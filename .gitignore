@@ -1,0 +1,7 @@
+.kiro/
+*.exe
+knowledge/
+.idea/
+.kirograph/
+*.log
+.opencode/

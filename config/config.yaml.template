@@ -1,0 +1,83 @@
+# Firefly Configuration Template
+# Copy this file to config.yaml and modify as needed
+
+# Service information
+name: firefly
+version: 1.0.0
+metadata:
+  environment: development
+
+# HTTP server configuration
+http:
+  network: tcp
+  port: 8080  # Can also use: address: ":8080" or address: "127.0.0.1:8080"
+  timeout: 30s
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 120s
+  # tls:
+  #   enabled: true
+  #   cert_file: /path/to/cert.pem
+  #   key_file: /path/to/key.pem
+
+# gRPC server configuration
+grpc:
+  network: tcp
+  port: 9090  # Can also use: address: ":9090" or address: "127.0.0.1:9090"
+  timeout: 30s
+  max_recv_msg_size: 4194304  # 4MB
+  max_send_msg_size: 4194304  # 4MB
+  # tls:
+  #   enabled: true
+  #   cert_file: /path/to/cert.pem
+  #   key_file: /path/to/key.pem
+
+# Logging configuration
+log:
+  filename: ""  # Empty for stdout only
+  max_size: 100  # MB
+  max_backups: 3
+  max_age: 7  # days
+  level: info  # debug, info, warn, error
+  json_format: true
+  location: true
+
+# Serializer configuration
+serializer:
+  mode: json  # json, protobuf
+  default_mode: json
+
+# Service registry configuration (optional)
+# registry:
+#   type: consul  # consul, etcd, nacos, file
+#   address: localhost:8500
+#   timeout: 10s
+
+# Database configuration (optional)
+# database:
+#   driver: mysql  # mysql, postgres, mongodb
+#   dsn: user:password@tcp(localhost:3306)/dbname?charset=utf8mb4&parseTime=True&loc=Local
+#   max_open_conns: 100
+#   max_idle_conns: 10
+#   conn_max_lifetime: 1h
+#   conn_max_idle_time: 10m
+
+# Redis configuration (optional)
+# redis:
+#   address: localhost:6379
+#   password: ""
+#   db: 0
+#   pool_size: 100
+#   min_idle_conns: 10
+#   max_retries: 3
+
+# Tracing configuration
+tracing:
+  enabled: false
+  endpoint: http://localhost:14268/api/traces
+  sampler_ratio: 1.0
+
+# Metrics configuration
+metrics:
+  enabled: true
+  path: /metrics

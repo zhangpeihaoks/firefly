@@ -1,0 +1,50 @@
+# Firefly Configuration
+
+# Service information
+name: firefly
+version: 1.0.0
+metadata:
+  environment: development
+
+# HTTP server configuration
+http:
+  network: tcp
+  port: 8080  # Can also use: address: ":8080" or address: "127.0.0.1:8080"
+  timeout: 30s
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 120s
+
+# gRPC server configuration
+grpc:
+  network: tcp
+  port: 9090  # Can also use: address: ":9090" or address: "127.0.0.1:9090"
+  timeout: 30s
+  max_recv_msg_size: 4194304  # 4MB
+  max_send_msg_size: 4194304  # 4MB
+
+# Logging configuration
+log:
+  filename: ""
+  max_size: 100
+  max_backups: 3
+  max_age: 7
+  level: info
+  json_format: true
+  location: true
+
+# Serializer configuration
+serializer:
+  mode: json
+  default_mode: json
+
+# Tracing configuration
+tracing:
+  enabled: false
+  endpoint: http://localhost:14268/api/traces
+  sampler_ratio: 1.0
+
+# Metrics configuration
+metrics:
+  enabled: true
+  path: /metrics
