@@ -2,9 +2,12 @@
 
 Firefly is a modular, extensible Go backend server framework with a layered architecture. It provides application lifecycle management, transport layer abstraction, middleware system, unified error handling, structured logging, serialization switching, and comprehensive property-based testing.
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/quajiu/firefly)](https://github.com/zhangpeihaoks/firefly)
-[![License](https://img.shields.io/github/license/quajiu/firefly)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/zhangpeihaoks/firefly)](https://goreportcard.com/report/github.com/zhangpeihaoks/firefly)
+[![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/zhangpeihaoks/firefly)
+](https://github.com/zhangpeihaoks/firefly)
+[![GitHub License](https://img.shields.io/github/license/zhangpeihaoks/firefly)
+](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/zhangpeihaoks/firefly)](https://goreportcard.com/badge/github.com/zhangpeihaoks/firefly)
+
 
 ## Features
 

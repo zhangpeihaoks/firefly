@@ -2,9 +2,11 @@
 
 Firefly 是一个模块化、可扩展的 Go 后端服务器框架，采用分层架构设计。提供应用生命周期管理、传输层抽象、中间件系统、统一错误处理、结构化日志、序列化切换等核心能力。
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/quajiu/firefly)](https://github.com/zhangpeihaoks/firefly)
-[![License](https://img.shields.io/github/license/quajiu/firefly)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/zhangpeihaoks/firefly)](https://goreportcard.com/report/github.com/zhangpeihaoks/firefly)
+[![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/zhangpeihaoks/firefly)
+](https://github.com/zhangpeihaoks/firefly)
+[![GitHub License](https://img.shields.io/github/license/zhangpeihaoks/firefly)
+](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/zhangpeihaoks/firefly)](https://goreportcard.com/badge/github.com/zhangpeihaoks/firefly)
 
 [English Documentation](README_EN.md)
 
