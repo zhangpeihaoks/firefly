@@ -281,3 +281,126 @@ func TestWireIntegration_PBT(t *testing.T) {
 		}
 	})
 }
+
+// Test types for interface binding tests
+type testGreeter interface {
+	Greet() string
+}
+
+type englishGreeter struct{
+	id int
+}
+var englishCounter int
+func (e *englishGreeter) Greet() string { return "Hello" }
+
+type chineseGreeter struct{}
+func (c *chineseGreeter) Greet() string { return "你好" }
+
+type greeterWithDep struct {
+	a *ServiceA
+}
+func (g *greeterWithDep) Greet() string { return "Hello with " + g.a.Name }
+
+// TestInterfaceBinding tests RegisterInterface and RegisterSingletonInterface.
+func TestInterfaceBinding(t *testing.T) {
+
+	t.Run("interface binding with RegisterInterface", func(t *testing.T) {
+		container := New()
+
+		// Register implementation under interface
+		err := RegisterInterface[testGreeter, *englishGreeter](container, func() *englishGreeter {
+			englishCounter++
+			return &englishGreeter{id: englishCounter}
+		})
+		if err != nil {
+			t.Fatalf("RegisterInterface failed: %v", err)
+		}
+
+		// Resolve by interface type
+		var g testGreeter
+		if err := container.Resolve(&g); err != nil {
+			t.Fatalf("failed to resolve Greeter: %v", err)
+		}
+
+		if g == nil {
+			t.Fatal("resolved Greeter is nil")
+		}
+		if g.Greet() != "Hello" {
+			t.Errorf("expected 'Hello', got %q", g.Greet())
+		}
+	})
+
+	t.Run("interface binding creates new instance each time", func(t *testing.T) {
+		container := New()
+
+		RegisterInterface[testGreeter, *englishGreeter](container, func() *englishGreeter {
+			englishCounter++
+			return &englishGreeter{id: englishCounter}
+		})
+
+		var g1, g2 testGreeter
+		container.Resolve(&g1)
+		container.Resolve(&g2)
+
+		// Transient: should be different instances
+		if g1 == g2 {
+			t.Error("expected different instances for non-singleton RegisterInterface")
+		}
+	})
+
+	t.Run("singleton interface binding", func(t *testing.T) {
+		container := New()
+
+		RegisterSingletonInterface[testGreeter, *chineseGreeter](container, func() *chineseGreeter {
+			return &chineseGreeter{}
+		})
+
+		var g1, g2 testGreeter
+		container.Resolve(&g1)
+		container.Resolve(&g2)
+
+		if g1 == nil || g2 == nil {
+			t.Fatal("resolved Greeter is nil")
+		}
+		if g1 != g2 {
+			t.Error("expected same instance for singleton")
+		}
+		if g1.Greet() != "你好" {
+			t.Errorf("expected '你好', got %q", g1.Greet())
+		}
+	})
+
+	t.Run("RegisterInterface rejects incompatible types", func(t *testing.T) {
+		container := New()
+
+		// *ServiceA does not implement Greeter
+		err := RegisterInterface[testGreeter, *ServiceA](container, func() *ServiceA {
+			return &ServiceA{Name: "test"}
+		})
+		if err == nil {
+			t.Error("expected error for incompatible types, got nil")
+		}
+	})
+
+	t.Run("interface binding with constructor dependencies", func(t *testing.T) {
+		container := New()
+
+		// Register a dependency
+		container.Register(func() *ServiceA {
+			return &ServiceA{Name: "dep"}
+		})
+
+		// Interface binding with constructor that depends on ServiceA
+		RegisterInterface[testGreeter, *greeterWithDep](container, func(a *ServiceA) *greeterWithDep {
+			return &greeterWithDep{a: a}
+		})
+
+		var g testGreeter
+		if err := container.Resolve(&g); err != nil {
+			t.Fatalf("failed to resolve Greeter with deps: %v", err)
+		}
+		if g == nil {
+			t.Fatal("resolved Greeter is nil")
+		}
+	})
+}

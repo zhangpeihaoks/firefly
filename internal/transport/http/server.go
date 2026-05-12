@@ -5,17 +5,29 @@ package http
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/zhangpeihaoks/firefly/internal/log"
 	"github.com/zhangpeihaoks/firefly/internal/middleware"
+)
+
+// startStatus represents the server start status.
+type startStatus int32
+
+const (
+	statusNotStarted startStatus = iota
+	statusStarting
+	statusStarted
+	statusFailed
 )
 
 // Server is the HTTP server implementation.
@@ -26,6 +38,7 @@ type Server struct {
 	once             sync.Once
 	endpoint         *url.URL
 	err              error
+	startStatus      atomic.Int32
 	network          string
 	address          string
 	timeout          time.Duration
@@ -36,6 +49,9 @@ type Server struct {
 	tlsConf          *tls.Config
 	requestSizeLimit bool
 }
+
+// ErrServerFailed indicates the server failed to start previously.
+var ErrServerFailed = errors.New("http server previously failed to start")
 
 // ServerOption is a function that configures the HTTP server.
 type ServerOption func(*Server)
@@ -91,42 +107,58 @@ func NewServer(opts ...ServerOption) *Server {
 // Start starts the HTTP server.
 // It implements transport.Server interface.
 func (s *Server) Start(ctx context.Context) error {
-	s.once.Do(func() {
-		// Create listener
-		lis, err := net.Listen(s.network, s.address)
-		if err != nil {
-			s.err = err
-			return
+	// Check current status before attempting to start
+	status := startStatus(s.startStatus.Load())
+	switch status {
+	case statusStarted:
+		return nil
+	case statusStarting:
+		return errors.New("http server is already starting")
+	case statusFailed:
+		return fmt.Errorf("%w: %v", ErrServerFailed, s.err)
+	}
+
+	// Attempt to mark as starting (only if currently NotStarted)
+	if !s.startStatus.CompareAndSwap(int32(statusNotStarted), int32(statusStarting)) {
+		return errors.New("http server start race condition")
+	}
+
+	// Create listener
+	lis, err := net.Listen(s.network, s.address)
+	if err != nil {
+		s.err = err
+		s.startStatus.Store(int32(statusFailed))
+		return err
+	}
+	s.lis = lis
+
+	// Build endpoint URL
+	s.endpoint = &url.URL{
+		Scheme: "http",
+		Host:   lis.Addr().String(),
+	}
+
+	// Log server start
+	s.log.Info("HTTP server starting",
+		"address", s.address,
+		"network", s.network,
+	)
+
+	// Start server in goroutine
+	go func() {
+		var err error
+		if s.tlsConf != nil {
+			err = s.ServeTLS(s.lis, "", "")
+		} else {
+			err = s.Serve(s.lis)
 		}
-		s.lis = lis
-
-		// Build endpoint URL
-		s.endpoint = &url.URL{
-			Scheme: "http",
-			Host:   lis.Addr().String(),
+		if err != nil && err != http.ErrServerClosed {
+			s.log.Error("HTTP server error", "error", err)
 		}
+	}()
 
-		// Log server start
-		s.log.Info("HTTP server starting",
-			"address", s.address,
-			"network", s.network,
-		)
-
-		// Start server in goroutine
-		go func() {
-			var err error
-			if s.tlsConf != nil {
-				err = s.ServeTLS(s.lis, "", "")
-			} else {
-				err = s.Serve(s.lis)
-			}
-			if err != nil && err != http.ErrServerClosed {
-				s.log.Error("HTTP server error", "error", err)
-			}
-		}()
-	})
-
-	return s.err
+	s.startStatus.Store(int32(statusStarted))
+	return nil
 }
 
 // Stop stops the HTTP server gracefully.
@@ -269,6 +301,7 @@ func (s *Server) createGinHandler(handler middleware.Handler, ms ...middleware.M
 		}
 
 		// Handle response based on type
+		// Use 200 as default success status code
 		c.JSON(200, resp)
 	}
 }
@@ -325,4 +358,10 @@ func (s *Server) RegisterMetrics(path string, handler http.Handler) {
 	s.router.GET(path, func(c *gin.Context) {
 		handler.ServeHTTP(c.Writer, c.Request)
 	})
+}
+
+// Router returns the underlying Gin engine for advanced route configuration
+// such as mounting admin endpoints, pprof handlers, or other middleware.
+func (s *Server) Router() *gin.Engine {
+	return s.router
 }

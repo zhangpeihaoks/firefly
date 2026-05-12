@@ -362,7 +362,7 @@ func TestProperty47SerializerContentType(t *testing.T) {
 	// Test ProtobufSerializer ContentType
 	t.Run("protobuf_serializer_content_type", func(t *testing.T) {
 		serializer := NewProtobufSerializer()
-		expectedContentType := "application/x-protobuf"
+		expectedContentType := "application/protobuf"
 
 		// Test that ContentType always returns the same value
 		contentTypeProp := func(_ bool) bool {
@@ -391,8 +391,8 @@ func TestProperty47SerializerContentType(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if protobufSerializer.ContentType() != "application/x-protobuf" {
-			t.Errorf("expected application/x-protobuf, got %s", protobufSerializer.ContentType())
+		if protobufSerializer.ContentType() != "application/protobuf" {
+			t.Errorf("expected application/protobuf, got %s", protobufSerializer.ContentType())
 		}
 	})
 
@@ -406,7 +406,7 @@ func TestProperty47SerializerContentType(t *testing.T) {
 			if jsonSerializer.ContentType() != "application/json" {
 				t.Error("JSON ContentType not idempotent")
 			}
-			if protobufSerializer.ContentType() != "application/x-protobuf" {
+			if protobufSerializer.ContentType() != "application/protobuf" {
 				t.Error("Protobuf ContentType not idempotent")
 			}
 		}
@@ -645,10 +645,10 @@ func TestProperty47ContentTypeConsistency(t *testing.T) {
 		t.Errorf("JSON ContentType consistency property failed: %v", err)
 	}
 
-	// Property: All ProtobufSerializers should return "application/x-protobuf"
+	// Property: All ProtobufSerializers should return "application/protobuf"
 	protobufProp := func(_ int) bool {
 		s := NewProtobufSerializer()
-		return s.ContentType() == "application/x-protobuf"
+		return s.ContentType() == "application/protobuf"
 	}
 	if err := quick.Check(protobufProp, &quick.Config{MaxCount: 100}); err != nil {
 		t.Errorf("Protobuf ContentType consistency property failed: %v", err)

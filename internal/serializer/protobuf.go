@@ -36,5 +36,5 @@ func (s *ProtobufSerializer) Unmarshal(data []byte, v any) error {
 
 // ContentType returns the Protobuf content type.
 func (s *ProtobufSerializer) ContentType() string {
-	return "application/x-protobuf"
+	return "application/protobuf"
 }

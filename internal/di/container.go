@@ -35,7 +35,12 @@ func New() *Container {
 }
 
 // Register registers a constructor for a type.
-// The constructor should be a function that returns a single value.
+// Supported constructor signatures:
+//   - func(...) T
+//   - func(...) (T, error)
+//   - func(...) (T, func())
+//   - func(...) (T, func(), error)
+//
 // For singletons, use RegisterSingleton.
 func (c *Container) Register(constructor any) error {
 	ctorType := reflect.TypeOf(constructor)
@@ -43,8 +48,8 @@ func (c *Container) Register(constructor any) error {
 		return fmt.Errorf("constructor must be a function")
 	}
 
-	if ctorType.NumOut() != 1 {
-		return fmt.Errorf("constructor must return exactly one value")
+	if ctorType.NumOut() == 0 {
+		return fmt.Errorf("constructor must return at least one value")
 	}
 
 	outType := ctorType.Out(0)
@@ -58,14 +63,19 @@ func (c *Container) Register(constructor any) error {
 
 // RegisterSingleton registers a singleton constructor for a type.
 // The constructor is called only once and the result is cached.
+// Supported constructor signatures:
+//   - func(...) T
+//   - func(...) (T, error)
+//   - func(...) (T, func())
+//   - func(...) (T, func(), error)
 func (c *Container) RegisterSingleton(constructor any) error {
 	ctorType := reflect.TypeOf(constructor)
 	if ctorType.Kind() != reflect.Func {
 		return fmt.Errorf("constructor must be a function")
 	}
 
-	if ctorType.NumOut() != 1 {
-		return fmt.Errorf("constructor must return exactly one value")
+	if ctorType.NumOut() == 0 {
+		return fmt.Errorf("constructor must return at least one value")
 	}
 
 	outType := ctorType.Out(0)
@@ -91,6 +101,74 @@ func (c *Container) RegisterInstance(instance any) error {
 	}
 	c.singletons[outType] = true
 
+	return nil
+}
+
+// RegisterInterface registers a constructor that returns implementation type T
+// under the interface type I. At registration time, a runtime check verifies
+// that T satisfies I, providing a clear error message if not.
+//
+// When resolving by interface type I, the constructor is invoked and the
+// returned T value (which implements I) is set as the resolved value.
+//
+// Example:
+//
+//	di.RegisterInterface[UserRepository, *MySQLRepo](container, func(db *sql.DB) *MySQLRepo { ... })
+func RegisterInterface[I any, T any](c *Container, constructor any) error {
+	ctorType := reflect.TypeOf(constructor)
+	if ctorType.Kind() != reflect.Func {
+		return fmt.Errorf("constructor must be a function")
+	}
+	if ctorType.NumOut() == 0 {
+		return fmt.Errorf("constructor must return at least one value")
+	}
+
+	ifaceType := reflect.TypeOf((*I)(nil)).Elem()
+	implType := reflect.TypeOf((*T)(nil)).Elem()
+
+	// Runtime verification: T must implement I
+	if ifaceType.Kind() == reflect.Interface && !implType.Implements(ifaceType) {
+		return fmt.Errorf("type %s does not implement interface %s", implType, ifaceType)
+	}
+
+	c.providers[ifaceType] = &provider{
+		constructor: constructor,
+		isSingleton: false,
+	}
+	return nil
+}
+
+// RegisterSingletonInterface registers a singleton constructor that returns
+// implementation type T under the interface type I. The constructor is called
+// only once and the result is cached.
+//
+// A runtime check verifies that T satisfies I at registration time.
+//
+// Example:
+//
+//	di.RegisterSingletonInterface[ConfigProvider, *EnvConfig](container, func() *EnvConfig { ... })
+func RegisterSingletonInterface[I any, T any](c *Container, constructor any) error {
+	ctorType := reflect.TypeOf(constructor)
+	if ctorType.Kind() != reflect.Func {
+		return fmt.Errorf("constructor must be a function")
+	}
+	if ctorType.NumOut() == 0 {
+		return fmt.Errorf("constructor must return at least one value")
+	}
+
+	ifaceType := reflect.TypeOf((*I)(nil)).Elem()
+	implType := reflect.TypeOf((*T)(nil)).Elem()
+
+	// Runtime verification: T must implement I
+	if ifaceType.Kind() == reflect.Interface && !implType.Implements(ifaceType) {
+		return fmt.Errorf("type %s does not implement interface %s", implType, ifaceType)
+	}
+
+	c.providers[ifaceType] = &provider{
+		constructor: constructor,
+		isSingleton: true,
+	}
+	c.singletons[ifaceType] = true
 	return nil
 }
 
@@ -141,14 +219,14 @@ func (c *Container) Resolve(target any) error {
 }
 
 // callConstructor calls a constructor with dependency injection.
+// Supported constructor signatures:
+//   - func(...) T
+//   - func(...) (T, error)
+//   - func(...) (T, func())
+//   - func(...) (T, func(), error)
 func (c *Container) callConstructor(constructor any) (any, error) {
 	ctorType := reflect.TypeOf(constructor)
 	numParams := ctorType.NumIn()
-
-	// If no parameters, just call the constructor
-	if numParams == 0 {
-		return reflect.ValueOf(constructor).Call(nil)[0].Interface(), nil
-	}
 
 	// Build arguments with dependency injection
 	args := make([]reflect.Value, numParams)
@@ -161,16 +239,53 @@ func (c *Container) callConstructor(constructor any) (any, error) {
 		args[i] = reflect.ValueOf(arg)
 	}
 
-	result := reflect.ValueOf(constructor).Call(args)
-	if len(result) == 0 || result[0].IsNil() {
-		// If there's an error, return it
-		if len(result) > 1 && !result[1].IsNil() {
-			return nil, result[1].Interface().(error)
-		}
-		return nil, fmt.Errorf("constructor returned nil")
+	results := reflect.ValueOf(constructor).Call(args)
+	numOut := len(results)
+
+	// No return values
+	if numOut == 0 {
+		return nil, nil
 	}
 
-	return result[0].Interface(), nil
+	// Parse return values based on known patterns
+	// Pattern 1: (T) or (T, error) or (T, func()) or (T, func(), error)
+	instance := results[0].Interface()
+	if numOut == 1 {
+		return instance, nil
+	}
+
+	// Check the second return value type
+	secondIsError := isErrorType(results[1].Type())
+
+	if numOut == 2 {
+		if secondIsError {
+			// Pattern: (T, error)
+			if !results[1].IsNil() {
+				return nil, results[1].Interface().(error)
+			}
+			return instance, nil
+		}
+		// Pattern: (T, func()) — cleanup function is returned but not tracked here
+		return instance, nil
+	}
+
+	if numOut == 3 {
+		// Pattern: (T, func(), error)
+		if !results[2].IsNil() {
+			err := results[2].Interface().(error)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return instance, nil
+	}
+
+	return instance, nil
+}
+
+// isErrorType checks if a reflect.Type implements the error interface.
+func isErrorType(t reflect.Type) bool {
+	return t.Implements(reflect.TypeOf((*error)(nil)).Elem())
 }
 
 // resolveDependency resolves a single dependency.

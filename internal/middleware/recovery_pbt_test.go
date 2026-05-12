@@ -4,6 +4,7 @@ package middleware
 import (
 	"context"
 	"math/rand"
+	"reflect"
 	"testing"
 	"testing/quick"
 
@@ -24,6 +25,9 @@ func TestProperty6_RecoveryPanicCapture(t *testing.T) {
 	f := func(panicType int) bool {
 		// Ensure panicType is valid (0-3 for different panic types)
 		panicType = panicType % 4
+		if panicType < 0 {
+			panicType = -panicType
+		}
 
 		// Create a handler that panics with different values based on panicType
 		var panicHandler func(ctx context.Context, req any) (any, error)
@@ -110,6 +114,9 @@ func TestProperty6_RecoveryPreservesNormalFlow(t *testing.T) {
 	// the response and error without modification.
 	f := func(responseType int, shouldError bool) bool {
 		responseType = responseType % 4
+		if responseType < 0 {
+			responseType = -responseType
+		}
 
 		var expectedResp any
 		var expectedErr error
@@ -140,9 +147,12 @@ func TestProperty6_RecoveryPreservesNormalFlow(t *testing.T) {
 			}
 		case 3:
 			// Error response (without panic) - only when shouldError is true
-			expectedResp = nil
 			if shouldError {
+				expectedResp = nil
 				expectedErr = errors.New(400, "BAD_REQUEST", "bad request")
+			} else {
+				expectedResp = "ok"
+				expectedErr = nil
 			}
 			handler = func(ctx context.Context, req any) (any, error) {
 				if shouldError {
@@ -161,16 +171,14 @@ func TestProperty6_RecoveryPreservesNormalFlow(t *testing.T) {
 
 		// Property assertions:
 		// 1. Response should match expected
-		if resp != expectedResp {
-			// For map comparison, we need to check if both are nil or equal
-			if !(resp == nil && expectedResp == nil) {
-				t.Logf("Expected response %v, got %v", expectedResp, resp)
-				return false
-			}
+		if !reflect.DeepEqual(resp, expectedResp) {
+			t.Logf("Expected response %v, got %v", expectedResp, resp)
+			return false
 		}
 
 		// 2. Error should match expected
-		if err != expectedErr {
+		// Use reflect.DeepEqual for error comparison since errors.Error contains a map
+		if !reflect.DeepEqual(err, expectedErr) {
 			// If both are errors, compare codes
 			if err != nil && expectedErr != nil {
 				appErr, ok := err.(*errors.Error)
@@ -179,8 +187,6 @@ func TestProperty6_RecoveryPreservesNormalFlow(t *testing.T) {
 					t.Logf("Expected error %v, got %v", expectedErr, err)
 					return false
 				}
-			} else if err == nil && expectedErr == nil {
-				// Both nil, that's fine
 			} else {
 				t.Logf("Expected error %v, got %v", expectedErr, err)
 				return false
@@ -355,6 +361,9 @@ func TestProperty6_RecoveryCustomHandler(t *testing.T) {
 	// Property: Custom handler should be called with the panic value
 	f := func(panicType int) bool {
 		panicType = panicType % 3
+		if panicType < 0 {
+			panicType = -panicType
+		}
 
 		var handlerCalled bool
 		var capturedPanic any

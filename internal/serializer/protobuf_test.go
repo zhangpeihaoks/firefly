@@ -294,7 +294,7 @@ func TestProtobufSerializerContentType(t *testing.T) {
 	}{
 		{
 			name: "protobuf content type",
-			want: "application/x-protobuf",
+			want: "application/protobuf",
 		},
 	}
 
@@ -309,7 +309,7 @@ func TestProtobufSerializerContentType(t *testing.T) {
 
 	// Additional test: multiple calls return consistent result
 	for i := 0; i < 10; i++ {
-		if serializer.ContentType() != "application/x-protobuf" {
+		if serializer.ContentType() != "application/protobuf" {
 			t.Errorf("ContentType() not consistent on call %d", i)
 		}
 	}

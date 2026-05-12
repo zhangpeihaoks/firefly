@@ -14,6 +14,7 @@ const (
 	CodeConflict           = 409
 	CodeInternal           = 500
 	CodeServiceUnavailable = 503
+	CodeGatewayTimeout     = 504
 )
 
 // Standard error instances
@@ -30,6 +31,8 @@ var (
 	ErrInternal = New(CodeInternal, "INTERNAL_ERROR", "内部服务错误")
 	// ErrServiceUnavailable represents a 503 Service Unavailable error
 	ErrServiceUnavailable = New(CodeServiceUnavailable, "SERVICE_UNAVAILABLE", "服务不可用")
+	// ErrGatewayTimeout represents a 504 Gateway Timeout error
+	ErrGatewayTimeout = New(CodeGatewayTimeout, "GATEWAY_TIMEOUT", "请求超时")
 )
 
 // HTTPToGRPCCode converts an HTTP status code to a gRPC status code.
@@ -51,6 +54,8 @@ func HTTPToGRPCCode(code int) codes.Code {
 		return codes.Internal
 	case CodeServiceUnavailable:
 		return codes.Unavailable
+	case CodeGatewayTimeout:
+		return codes.DeadlineExceeded
 	default:
 		return codes.Unknown
 	}
@@ -101,6 +106,8 @@ func ToHTTPStatus(code int) int {
 		return CodeInternal
 	case CodeServiceUnavailable:
 		return CodeServiceUnavailable
+	case CodeGatewayTimeout:
+		return CodeGatewayTimeout
 	default:
 		// Ensure it's a valid HTTP status code
 		if code >= 100 && code < 600 {

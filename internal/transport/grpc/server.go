@@ -5,11 +5,13 @@ package grpc
 import (
 	"context"
 	"crypto/tls"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zhangpeihaoks/firefly/internal/errors"
@@ -22,6 +24,16 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
+// startStatus represents the gRPC server start status.
+type startStatus int32
+
+const (
+	statusNotStarted startStatus = iota
+	statusStarting
+	statusStarted
+	statusFailed
+)
+
 // Server is the gRPC server implementation.
 // It implements transport.Server and transport.Endpointer interfaces.
 type Server struct {
@@ -30,10 +42,13 @@ type Server struct {
 	once           sync.Once
 	endpoint       *url.URL
 	err            error
+	startStatus    atomic.Int32
 	network        string
 	address        string
 	timeout        time.Duration
 	ms             []middleware.Middleware
+	handlers       map[string]Handler
+	mu             sync.RWMutex
 	log            *slog.Logger
 	health         *health.Server
 	tlsConf        *tls.Config
@@ -42,6 +57,10 @@ type Server struct {
 	maxRecvMsgSize int
 	maxSendMsgSize int
 }
+
+// ErrServerFailed indicates the server failed to start previously.
+var ErrServerFailed = stderrors.New("grpc server previously failed to start")
+
 
 // ServerOption is a function that configures the gRPC server.
 type ServerOption func(*Server)
@@ -107,7 +126,11 @@ func NewServer(opts ...ServerOption) *Server {
 func (s *Server) chainUnaryInterceptors() []grpc.UnaryServerInterceptor {
 	var interceptors []grpc.UnaryServerInterceptor
 
-	// Add recovery interceptor first to catch panics
+	// Add transport context interceptor first — ensures ALL gRPC requests
+	// (including proto-registered services) get a Transport Context.
+	interceptors = append(interceptors, s.transportContextInterceptor())
+
+	// Add recovery interceptor to catch panics
 	interceptors = append(interceptors, s.recoveryUnaryInterceptor())
 
 	// Add logging interceptor
@@ -120,6 +143,9 @@ func (s *Server) chainUnaryInterceptors() []grpc.UnaryServerInterceptor {
 	if len(s.ms) > 0 {
 		interceptors = append(interceptors, s.middlewareUnaryInterceptor())
 	}
+
+	// Add handler dispatcher (innermost — dispatches to registered handlers)
+	interceptors = append(interceptors, s.handlerUnaryInterceptor())
 
 	return interceptors
 }
@@ -139,6 +165,16 @@ func (s *Server) chainStreamInterceptors() []grpc.StreamServerInterceptor {
 	interceptors = append(interceptors, s.streamInts...)
 
 	return interceptors
+}
+
+// transportContextInterceptor returns a unary interceptor that injects a gRPC
+// Transport Context into every request. This ensures that proto-registered
+// services (not just Firefly-registered handlers) receive transport metadata.
+func (s *Server) transportContextInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		ctx = NewGRPCContext(ctx, info.FullMethod)
+		return handler(ctx, req)
+	}
 }
 
 // recoveryUnaryInterceptor returns a unary interceptor that recovers from panics.
@@ -260,36 +296,52 @@ func (s *Server) middlewareUnaryInterceptor() grpc.UnaryServerInterceptor {
 // Start starts the gRPC server.
 // It implements transport.Server interface.
 func (s *Server) Start(ctx context.Context) error {
-	s.once.Do(func() {
-		// Create listener
-		lis, err := net.Listen(s.network, s.address)
-		if err != nil {
-			s.err = err
-			return
+	// Check current status before attempting to start
+	status := startStatus(s.startStatus.Load())
+	switch status {
+	case statusStarted:
+		return nil
+	case statusStarting:
+		return stderrors.New("grpc server is already starting")
+	case statusFailed:
+		return fmt.Errorf("%w: %v", ErrServerFailed, s.err)
+	}
+
+	// Attempt to mark as starting (only if currently NotStarted)
+	if !s.startStatus.CompareAndSwap(int32(statusNotStarted), int32(statusStarting)) {
+		return stderrors.New("grpc server start race condition")
+	}
+
+	// Create listener
+	lis, err := net.Listen(s.network, s.address)
+	if err != nil {
+		s.err = err
+		s.startStatus.Store(int32(statusFailed))
+		return err
+	}
+	s.lis = lis
+
+	// Build endpoint URL
+	s.endpoint = &url.URL{
+		Scheme: "grpc",
+		Host:   lis.Addr().String(),
+	}
+
+	// Log server start
+	s.log.Info("gRPC server starting",
+		"address", s.address,
+		"network", s.network,
+	)
+
+	// Start server in goroutine
+	go func() {
+		if err := s.Server.Serve(s.lis); err != nil && err != grpc.ErrServerStopped {
+			s.log.Error("gRPC server error", "error", err)
 		}
-		s.lis = lis
+	}()
 
-		// Build endpoint URL
-		s.endpoint = &url.URL{
-			Scheme: "grpc",
-			Host:   lis.Addr().String(),
-		}
-
-		// Log server start
-		s.log.Info("gRPC server starting",
-			"address", s.address,
-			"network", s.network,
-		)
-
-		// Start server in goroutine
-		go func() {
-			if err := s.Server.Serve(s.lis); err != nil && err != grpc.ErrServerStopped {
-				s.log.Error("gRPC server error", "error", err)
-			}
-		}()
-	})
-
-	return s.err
+	s.startStatus.Store(int32(statusStarted))
+	return nil
 }
 
 // Stop stops the gRPC server gracefully.

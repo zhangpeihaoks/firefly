@@ -1,11 +1,20 @@
 # Firefly Configuration Template
 # Copy this file to config.yaml and modify as needed
+#
+# Environment variable override:
+#   Configuration values can be overridden via environment variables with the
+#   FIREFLY_ prefix. Dots are replaced with underscores.
+#   Example: FIREFLY_HTTP_ADDRESS=:9090 overrides http.address
 
 # Service information
 name: firefly
 version: 1.0.0
 metadata:
   environment: development
+
+# Config hot-reload settings
+config_watch:
+  enabled: true  # Enable config file hot-reload (fsnotify)
 
 # HTTP server configuration
 http:

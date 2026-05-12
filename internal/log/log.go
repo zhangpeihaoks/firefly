@@ -149,6 +149,8 @@ func New(c *Config) (cleanup func()) {
 	var handler slog.Handler
 	if c.JSONFormat {
 		handler = slog.NewJSONHandler(writer, opts)
+		// Wrap with context handler for automatic request_id propagation
+		handler = NewContextHandler(handler)
 	} else {
 		handler = slog.NewTextHandler(writer, opts)
 	}

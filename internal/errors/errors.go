@@ -9,6 +9,8 @@ import (
 )
 
 // Error is the unified error structure for the framework.
+// It supports error wrapping via the cause field, enabling error chains
+// compatible with errors.Is and errors.As.
 type Error struct {
 	// Code is the error code (typically HTTP status code)
 	Code int32 `json:"code"`
@@ -18,6 +20,8 @@ type Error struct {
 	Message string `json:"message"`
 	// Metadata contains additional error context
 	Metadata map[string]string `json:"metadata,omitempty"`
+	// cause is the wrapped error (not serialized to JSON)
+	cause error `json:"-"`
 }
 
 // New creates a new Error with the given code, reason, and message.
@@ -67,6 +71,49 @@ func (e *Error) Is(err error) bool {
 		return e.Code == target.Code && e.Reason == target.Reason
 	}
 	return false
+}
+
+// Unwrap returns the wrapped error, enabling errors.Is and errors.As
+// to traverse the error chain.
+func (e *Error) Unwrap() error {
+	return e.cause
+}
+
+// Wrap wraps an existing error with additional error code, reason, and message.
+// The original error is preserved and accessible via errors.Unwrap.
+// If code is 0 and the inner error is *Error, its code is inherited.
+//
+// Example:
+//
+//	errors.Wrap(originalErr, 500, "DB_ERROR", "database query failed")
+func Wrap(err error, code int, reason, message string) *Error {
+	actualCode := code
+	if actualCode == 0 {
+		if e, ok := err.(*Error); ok {
+			actualCode = int(e.Code)
+		} else {
+			actualCode = CodeInternal
+		}
+	}
+
+	return &Error{
+		Code:    int32(actualCode),
+		Reason:  reason,
+		Message: message,
+		cause:   err,
+	}
+}
+
+// Unwrap is a convenience function that calls errors.Unwrap from the standard
+// library, provided here for discoverability within the framework.
+func Unwrap(err error) error {
+	type unwrapper interface {
+		Unwrap() error
+	}
+	if u, ok := err.(unwrapper); ok {
+		return u.Unwrap()
+	}
+	return nil
 }
 
 // FromError extracts an Error from the given error.

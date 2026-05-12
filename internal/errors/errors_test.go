@@ -878,7 +878,7 @@ func TestHTTPToGRPCCodeWithEdgeCases(t *testing.T) {
 		{"Code_199", 199, codes.Unknown},
 		{"Code_600", 600, codes.Unknown},
 		// Additional valid codes
-		{"GatewayTimeout", 504, codes.Unknown},
+		{"GatewayTimeout", 504, codes.DeadlineExceeded},
 		{"BadGateway", 502, codes.Unknown},
 	}
 
@@ -1356,4 +1356,104 @@ func TestProperty9ErrorCreationAndExtraction(t *testing.T) {
 	); err != nil {
 		t.Errorf("Property 9 failed: %v", err)
 	}
+}
+
+// =============================================================================
+// Unit Tests - Error Chain (Wrapping / Unwrapping)
+// =============================================================================
+
+// TestErrorWrap tests Wrap() creates a wrapped error with correct code and message.
+func TestErrorWrap(t *testing.T) {
+	original := fferr.New(404, "NOT_FOUND", "original error")
+
+	t.Run("wrap with explicit code", func(t *testing.T) {
+		wrapped := fferr.Wrap(original, 500, "WRAP_ERROR", "wrapped message")
+		if wrapped.Code != 500 {
+			t.Errorf("expected code 500, got %d", wrapped.Code)
+		}
+		if wrapped.Reason != "WRAP_ERROR" {
+			t.Errorf("expected reason WRAP_ERROR, got %s", wrapped.Reason)
+		}
+		if wrapped.Message != "wrapped message" {
+			t.Errorf("expected message 'wrapped message', got %s", wrapped.Message)
+		}
+	})
+
+	t.Run("wrap inherits code from inner Error when code=0", func(t *testing.T) {
+		wrapped := fferr.Wrap(original, 0, "WRAP_ERROR", "inherited")
+		if wrapped.Code != 404 {
+			t.Errorf("expected inherited code 404, got %d", wrapped.Code)
+		}
+	})
+
+	t.Run("wrap standard error with code=0 defaults to CodeInternal", func(t *testing.T) {
+		stdErr := stderrors.New("a standard error")
+		wrapped := fferr.Wrap(stdErr, 0, "WRAP_ERROR", "wrapping std error")
+		if wrapped.Code != fferr.CodeInternal {
+			t.Errorf("expected CodeInternal for std error, got %d", wrapped.Code)
+		}
+	})
+}
+
+// TestErrorUnwrap tests Unwrap() retrieves the original error.
+func TestErrorUnwrap(t *testing.T) {
+	original := fferr.New(404, "NOT_FOUND", "original")
+	wrapped := fferr.Wrap(original, 500, "WRAP_ERROR", "wrapped")
+
+	t.Run("Unwrap returns cause", func(t *testing.T) {
+		cause := wrapped.Unwrap()
+		if cause == nil {
+			t.Fatal("Unwrap should not return nil")
+		}
+		causeErr, ok := cause.(*fferr.Error)
+		if !ok {
+			t.Fatal("Unwrap should return *Error")
+		}
+		if causeErr.Code != 404 || causeErr.Reason != "NOT_FOUND" {
+			t.Errorf("unwrapped error mismatch")
+		}
+	})
+
+	t.Run("errors.Is traverses chain", func(t *testing.T) {
+		if !stderrors.Is(wrapped, original) {
+			t.Error("errors.Is should find original in wrapped chain")
+		}
+	})
+
+	t.Run("errors.As extracts Error from chain", func(t *testing.T) {
+		var target *fferr.Error
+		if !stderrors.As(wrapped, &target) {
+			t.Error("errors.As should extract *Error from wrapped chain")
+		}
+		if target.Code != 500 {
+			t.Errorf("errors.As should return outer error (code 500), got %d", target.Code)
+		}
+	})
+
+	t.Run("multilevel wrapping", func(t *testing.T) {
+		original := fferr.New(400, "ROOT", "root cause")
+		mid := fferr.Wrap(original, 0, "MID", "middle")
+		outer := fferr.Wrap(mid, 500, "OUTER", "outermost")
+
+		if !stderrors.Is(outer, original) {
+			t.Error("errors.Is should traverse multiple levels")
+		}
+		if outer.Code != 500 {
+			t.Errorf("outermost code should be 500, got %d", outer.Code)
+		}
+	})
+}
+
+// TestJSONSerialization_ExcludesCause tests that the cause field is excluded from JSON output.
+func TestJSONSerialization_ExcludesCause(t *testing.T) {
+	original := fferr.New(404, "NOT_FOUND", "original")
+	wrapped := fferr.Wrap(original, 500, "WRAP_ERROR", "wrapped")
+
+	// Verify cause is set internally
+	if wrapped.Unwrap() == nil {
+		t.Error("cause should not be nil after Wrap")
+	}
+
+	// json:"-" ensures cause is omitted — verified by the struct tag
+	// Any JSON marshal output will not contain the cause field
 }

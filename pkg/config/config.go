@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -13,8 +14,10 @@ import (
 
 // Config is the configuration manager.
 type Config struct {
-	viper *viper.Viper
-	mu    sync.RWMutex
+	viper     *viper.Viper
+	mu        sync.RWMutex
+	configPath string
+	callbacks  []func(any)
 }
 
 // Option is the configuration option function.
@@ -52,7 +55,9 @@ func WithType(configType string) Option {
 	}
 }
 
-// WithEnvPrefix sets the environment variable prefix.
+// WithEnvPrefix sets the environment variable prefix for automatic binding.
+// When set, environment variables like FIREFLY_HTTP_ADDRESS will override
+// config keys like http.address.
 func WithEnvPrefix(prefix string) Option {
 	return func(c *Config) {
 		c.viper.SetEnvPrefix(prefix)
@@ -60,11 +65,19 @@ func WithEnvPrefix(prefix string) Option {
 }
 
 // Load loads configuration from a file into the target structure.
+// It also enables automatic environment variable overrides via viper.
 func (c *Config) Load(path string, target any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.configPath = path
 	c.viper.SetConfigFile(path)
+
+	// Enable environment variable overrides
+	// Keys like "http.address" → env "FIREFLY_HTTP_ADDRESS"
+	c.viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	c.viper.AutomaticEnv()
+
 	if err := c.viper.ReadInConfig(); err != nil {
 		return fmt.Errorf("config: failed to read config file: %w", err)
 	}
@@ -96,14 +109,41 @@ func (c *Config) BindEnv(input ...string) error {
 	return c.viper.BindEnv(input...)
 }
 
-// Watch watches for configuration changes.
-func (c *Config) Watch(key string, onChange func(any)) {
+// Watch enables config file hot-reload. When the config file changes on disk,
+// it reloads the full configuration, unmarshals into target (which must be
+// a pointer to a Bootstrap struct), and invokes all registered callbacks.
+// Callbacks receive the newly loaded config value after each reload.
+func (c *Config) Watch(target any) {
 	c.viper.OnConfigChange(func(e fsnotify.Event) {
-		if e.Name == key {
-			onChange(c.viper.Get(key))
+		c.mu.Lock()
+		defer c.mu.Unlock()
+
+		slog.Info("config file changed, reloading", "file", e.Name)
+
+		if err := c.viper.ReadInConfig(); err != nil {
+			slog.Error("config: failed to reload config file", "error", err)
+			return
+		}
+		if err := c.viper.Unmarshal(target); err != nil {
+			slog.Error("config: failed to unmarshal config after reload", "error", err)
+			return
+		}
+
+		// Notify all registered callbacks
+		for _, fn := range c.callbacks {
+			fn(target)
 		}
 	})
 	c.viper.WatchConfig()
+}
+
+// OnChange registers a callback that is invoked whenever the configuration
+// is reloaded due to a file change. The callback receives the target config
+// struct (same pointer passed to Watch).
+func (c *Config) OnChange(fn func(any)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.callbacks = append(c.callbacks, fn)
 }
 
 // Get returns the value for the given key.

@@ -13,6 +13,7 @@ import (
 // Manager manages multiple database connections.
 type Manager struct {
 	connections map[string]Connector
+	configs     map[string]*Config
 	factories   map[DatabaseType]Factory
 	logger      *slog.Logger
 	mu          sync.RWMutex
@@ -25,6 +26,7 @@ type ManagerOption func(*Manager)
 func NewManager(opts ...ManagerOption) *Manager {
 	m := &Manager{
 		connections: make(map[string]Connector),
+		configs:     make(map[string]*Config),
 		factories:   make(map[DatabaseType]Factory),
 		logger:      slog.Default(),
 	}
@@ -74,8 +76,9 @@ func (m *Manager) Connect(ctx context.Context, name string, cfg *Config) (Connec
 		return nil, fmt.Errorf("failed to create database connection %q: %w", name, err)
 	}
 
-	// Store connection
+	// Store connection and config
 	m.connections[name] = connector
+	m.configs[name] = cfg
 
 	m.logger.Info("database connection established",
 		"name", name,
@@ -100,6 +103,7 @@ func (m *Manager) Disconnect(ctx context.Context, name string) error {
 	}
 
 	delete(m.connections, name)
+	delete(m.configs, name)
 
 	m.logger.Info("database connection closed", "name", name)
 	return nil
@@ -159,11 +163,57 @@ func (m *Manager) CloseAll(ctx context.Context) error {
 		m.logger.Info("database connection closed", "name", name)
 	}
 
-	// Clear connections
+	// Clear connections and configs
 	m.connections = make(map[string]Connector)
+	m.configs = make(map[string]*Config)
 
 	if len(errs) > 0 {
 		return fmt.Errorf("errors closing database connections: %v", errs)
+	}
+	return nil
+}
+
+// Reload disconnects all connections and reconnects them using their stored
+// configurations. This is designed to be called from a config change callback
+// to hot-reload database connections without restarting the application.
+func (m *Manager) Reload(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.logger.Info("reloading all database connections")
+
+	// Close all existing connections (but keep configs for reconnection)
+	var errs []error
+	for name, connector := range m.connections {
+		if err := connector.Disconnect(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("failed to close %q: %w", name, err))
+		}
+	}
+
+	// Clear connections map
+	m.connections = make(map[string]Connector)
+
+	// Reconnect all using stored configs
+	for name, cfg := range m.configs {
+		dbType := DatabaseType(cfg.Driver)
+		factory, exists := m.factories[dbType]
+		if !exists {
+			errs = append(errs, fmt.Errorf("no factory registered for database type %q", dbType))
+			continue
+		}
+
+		connector, err := factory.Create(cfg)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to reconnect %q: %w", name, err))
+			continue
+		}
+
+		m.connections[name] = connector
+		m.logger.Info("database connection re-established", "name", name, "driver", cfg.Driver)
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("errors during database reload: %v", errs)
 	}
 	return nil
 }
@@ -185,6 +235,58 @@ func (m *Manager) CheckHealth(ctx context.Context) map[string]*HealthStatus {
 		}
 	}
 	return results
+}
+
+// StoreConfig stores a database configuration without establishing a connection.
+// The connection will be established when Start is called.
+// This is useful for deferring connection establishment to application startup.
+func (m *Manager) StoreConfig(name string, cfg *Config) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.configs[name] = cfg
+	m.logger.Info("database config stored", "name", name, "driver", cfg.Driver)
+}
+
+// Start implements the app.Lifecycle interface. It connects to all stored
+// configurations that do not yet have active connections.
+func (m *Manager) Start(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var errs []error
+	for name, cfg := range m.configs {
+		// Skip if already connected
+		if _, exists := m.connections[name]; exists {
+			continue
+		}
+
+		dbType := DatabaseType(cfg.Driver)
+		factory, exists := m.factories[dbType]
+		if !exists {
+			errs = append(errs, fmt.Errorf("no factory registered for database type %q", dbType))
+			continue
+		}
+
+		connector, err := factory.Create(cfg)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to connect %q: %w", name, err))
+			continue
+		}
+
+		m.connections[name] = connector
+		m.logger.Info("database connection established at startup", "name", name, "driver", cfg.Driver)
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("errors starting database manager: %v", errs)
+	}
+	return nil
+}
+
+// Stop implements the app.Lifecycle interface. It closes all active database connections.
+func (m *Manager) Stop(ctx context.Context) error {
+	return m.CloseAll(ctx)
 }
 
 // List returns the names of all connections.

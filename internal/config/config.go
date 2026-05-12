@@ -1,5 +1,9 @@
 // Package config provides configuration management for the Firefly framework.
 // It uses Viper for configuration loading and supports YAML files.
+//
+// Deprecated: Use pkg/config instead. This package will be removed in a future version.
+// Migration: change "github.com/zhangpeihaoks/firefly/internal/config" to
+// "github.com/zhangpeihaoks/firefly/pkg/config" in your imports.
 package config
 
 import (
