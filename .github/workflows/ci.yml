@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  # ── Build ──────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - run: go build ./...
+
+  # ── Test (Linux) ───────────────────────────────────────
+  test:
+    name: Test (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - run: go test ./... -race -count=1 -coverprofile=coverage.out -covermode=atomic
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-linux
+          path: coverage.out
+
+  # ── Test (Windows) ─────────────────────────────────────
+  test-windows:
+    name: Test (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - run: go test ./... -count=1
+        # -race is slow on Windows, we rely on Linux for race detection
+
+  # ── Lint ───────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+  # ── Coverage Report ────────────────────────────────────
+  coverage:
+    name: Coverage
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-linux
+      - run: |
+          go tool cover -func=coverage.out | tail -1 | awk '{print "Coverage: " $3}'
+      - uses: codacy/codacy-coverage-reporter-action@v1
+        if: false  # Enable if Codacy token is configured
+        with:
+          project-token: ${{ secrets.CODACY_PROJECT_TOKEN }}
+          coverage-reports: coverage.out
