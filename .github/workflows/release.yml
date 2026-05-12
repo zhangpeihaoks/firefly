@@ -32,7 +32,7 @@ jobs:
           tar czf firefly_${GOOS}_${GOARCH}.tar.gz firefly
           sha256sum firefly_${GOOS}_${GOARCH}.tar.gz > firefly_${GOOS}_${GOARCH}.tar.gz.sha256
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: firefly-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
