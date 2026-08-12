@@ -1,0 +1,101 @@
+# See https://golangci-lint.run/usage/configuration/ for all options.
+run:
+  concurrency: 4
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+linters:
+  enable:
+    - gofmt         # Checks if code is formatted correctly
+    - goimports     # Checks import statements are formatted correctly
+    - govet         # Reports suspicious constructs
+    - shadow        # Checks for variable shadowing
+    - ineffassign   # Detects ineffective assignments
+    - staticcheck   # Go static analysis
+    - errcheck      # Detects unchecked errors
+    - unconvert     # Detects unnecessary type conversions
+    - gosimple      # Simplifies code
+    - unused        # Detects unused code
+    - misspell      # Finds commonly misspelled English words
+    - revive        # Fast, configurable linter
+  disable:
+    - bodyclose     # Too many false positives in framework code
+    - noctx         # Not applicable for all HTTP client usage
+    - gosec         # Too strict for a framework, use manual review
+    - exhaustive    # Not required for all type switches
+
+linters-settings:
+  gofmt:
+    simplify: true
+  goimports:
+    local-prefixes: github.com/zhangpeihaoks/firefly
+  govet:
+    enable-all: true
+  errcheck:
+    check-type-assertions: false
+    check-blank: false
+  staticcheck:
+    checks:
+      - all
+      - -SA1019  # Allow deprecated packages
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+        disabled: false
+      - name: blank-imports
+        severity: warning
+      - name: var-naming
+        severity: warning
+      - name: package-comments
+        severity: warning
+        disabled: true  # Allow missing package comments for test files
+      - name: error-return
+        severity: error
+      - name: error-strings
+        severity: warning
+      - name: error-naming
+        severity: warning
+      - name: if-return
+        severity: warning
+      - name: range-val-in-closure
+        severity: warning
+      - name: unconditional-recursion
+        severity: error
+      - name: unused-parameter
+        severity: warning
+        disabled: true
+      - name: confusing-naming
+        severity: warning
+      - name: confusing-results
+        severity: warning
+        disabled: true
+      - name: constant-logical-expr
+        severity: error
+
+issues:
+  exclude-dirs:
+    - .kiro
+    - .kirograph
+    - .opencode
+    - knowledge
+    - docs
+    - examples
+    - integration
+    - tool
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosimple
+    - path: _pbt_test\.go
+      linters:
+        - gosimple
+        - unused
