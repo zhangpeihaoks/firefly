@@ -2,17 +2,18 @@ package response
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
 func TestSuccess(t *testing.T) {
 	t.Run("with nil data", func(t *testing.T) {
-		resp := Success(nil)
+		resp := Success[any](nil)
 		if resp.Code != 200 {
 			t.Errorf("expected code 200, got %d", resp.Code)
 		}
-		if resp.Message != "success" {
-			t.Errorf("expected message 'success', got %q", resp.Message)
+		if resp.Msg != "success" {
+			t.Errorf("expected msg 'success', got %q", resp.Msg)
 		}
 		if resp.Data != nil {
 			t.Errorf("expected nil data, got %v", resp.Data)
@@ -33,12 +34,9 @@ func TestSuccess(t *testing.T) {
 		}
 		user := User{Name: "Alice", Age: 30}
 		resp := Success(user)
-		data, ok := resp.Data.(User)
-		if !ok {
-			t.Fatalf("expected User type, got %T", resp.Data)
-		}
-		if data.Name != "Alice" || data.Age != 30 {
-			t.Errorf("expected User{Alice, 30}, got %+v", data)
+		// T is inferred as User, so Data is directly comparable without assertion
+		if resp.Data != user {
+			t.Fatalf("expected User%+v, got %+v", user, resp.Data)
 		}
 	})
 
@@ -48,15 +46,18 @@ func TestSuccess(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to marshal response: %v", err)
 		}
-		var decoded Response
+		if !strings.Contains(string(data), `"msg":"success"`) {
+			t.Errorf("expected msg field in JSON, got %s", data)
+		}
+		var decoded Response[any]
 		if err := json.Unmarshal(data, &decoded); err != nil {
 			t.Fatalf("failed to unmarshal: %v", err)
 		}
 		if decoded.Code != 200 {
 			t.Errorf("expected code 200, got %d", decoded.Code)
 		}
-		if decoded.Message != "success" {
-			t.Errorf("expected message 'success', got %q", decoded.Message)
+		if decoded.Msg != "success" {
+			t.Errorf("expected msg 'success', got %q", decoded.Msg)
 		}
 	})
 }
@@ -67,8 +68,8 @@ func TestSuccessWithMessage(t *testing.T) {
 		if resp.Code != 200 {
 			t.Errorf("expected code 200, got %d", resp.Code)
 		}
-		if resp.Message != "操作成功" {
-			t.Errorf("expected message '操作成功', got %q", resp.Message)
+		if resp.Msg != "操作成功" {
+			t.Errorf("expected msg '操作成功', got %q", resp.Msg)
 		}
 		if resp.Data != "data" {
 			t.Errorf("expected data 'data', got %v", resp.Data)
@@ -76,7 +77,7 @@ func TestSuccessWithMessage(t *testing.T) {
 	})
 
 	t.Run("with nil data", func(t *testing.T) {
-		resp := SuccessWithMessage("created", nil)
+		resp := SuccessWithMessage[any]("created", nil)
 		if resp.Data != nil {
 			t.Errorf("expected nil data, got %v", resp.Data)
 		}
@@ -90,8 +91,8 @@ func TestSuccessWithPage(t *testing.T) {
 		if resp.Code != 200 {
 			t.Errorf("expected code 200, got %d", resp.Code)
 		}
-		if resp.Message != "success" {
-			t.Errorf("expected message 'success', got %q", resp.Message)
+		if resp.Msg != "success" {
+			t.Errorf("expected msg 'success', got %q", resp.Msg)
 		}
 		if resp.Page == nil {
 			t.Fatal("expected page info, got nil")
@@ -119,7 +120,7 @@ func TestSuccessWithPage(t *testing.T) {
 	})
 
 	t.Run("exact division", func(t *testing.T) {
-		resp := SuccessWithPage(nil, 2, 5, 10)
+		resp := SuccessWithPage[any](nil, 2, 5, 10)
 		if resp.Page.TotalPage != 2 {
 			t.Errorf("expected total page 2, got %d", resp.Page.TotalPage)
 		}
@@ -131,7 +132,7 @@ func TestSuccessWithPage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to marshal: %v", err)
 		}
-		var decoded PageResponse
+		var decoded PageResponse[any]
 		if err := json.Unmarshal(data, &decoded); err != nil {
 			t.Fatalf("failed to unmarshal: %v", err)
 		}
@@ -147,8 +148,8 @@ func TestError(t *testing.T) {
 		if resp.Code != 400 {
 			t.Errorf("expected code 400, got %d", resp.Code)
 		}
-		if resp.Message != "bad request" {
-			t.Errorf("expected message 'bad request', got %q", resp.Message)
+		if resp.Msg != "bad request" {
+			t.Errorf("expected msg 'bad request', got %q", resp.Msg)
 		}
 		if resp.Data != nil {
 			t.Errorf("expected nil data, got %v", resp.Data)
@@ -157,8 +158,8 @@ func TestError(t *testing.T) {
 
 	t.Run("different status codes", func(t *testing.T) {
 		tests := []struct {
-			code    int
-			message string
+			code int
+			msg  string
 		}{
 			{400, "Bad Request"},
 			{401, "Unauthorized"},
@@ -168,7 +169,7 @@ func TestError(t *testing.T) {
 			{503, "Service Unavailable"},
 		}
 		for _, tt := range tests {
-			resp := Error(tt.code, tt.message)
+			resp := Error(tt.code, tt.msg)
 			if resp.Code != tt.code {
 				t.Errorf("expected code %d, got %d", tt.code, resp.Code)
 			}
@@ -181,15 +182,19 @@ func TestError(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to marshal: %v", err)
 		}
-		var decoded Response
+		// The {code, msg, data} envelope must be stable: data is serialized as null
+		if !strings.Contains(string(data), `"data":null`) {
+			t.Errorf("expected data:null in error JSON, got %s", data)
+		}
+		var decoded Response[any]
 		if err := json.Unmarshal(data, &decoded); err != nil {
 			t.Fatalf("failed to unmarshal: %v", err)
 		}
 		if decoded.Code != 500 {
 			t.Errorf("expected code 500, got %d", decoded.Code)
 		}
-		if decoded.Message != "internal error" {
-			t.Errorf("expected 'internal error', got %q", decoded.Message)
+		if decoded.Msg != "internal error" {
+			t.Errorf("expected 'internal error', got %q", decoded.Msg)
 		}
 	})
 }
@@ -203,20 +208,16 @@ func TestErrorWithData(t *testing.T) {
 		if resp.Code != 422 {
 			t.Errorf("expected code 422, got %d", resp.Code)
 		}
-		if resp.Message != "validation failed" {
-			t.Errorf("expected 'validation failed', got %q", resp.Message)
+		if resp.Msg != "validation failed" {
+			t.Errorf("expected 'validation failed', got %q", resp.Msg)
 		}
-		data, ok := resp.Data.(map[string]string)
-		if !ok {
-			t.Fatalf("expected map[string]string, got %T", resp.Data)
-		}
-		if data["field"] != "name" {
-			t.Errorf("expected field 'name', got %q", data["field"])
+		if resp.Data["field"] != "name" {
+			t.Errorf("expected field 'name', got %q", resp.Data["field"])
 		}
 	})
 
 	t.Run("nil data", func(t *testing.T) {
-		resp := ErrorWithData(400, "error", nil)
+		resp := ErrorWithData[any](400, "error", nil)
 		if resp.Data != nil {
 			t.Errorf("expected nil data, got %v", resp.Data)
 		}

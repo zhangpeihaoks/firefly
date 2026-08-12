@@ -751,8 +751,8 @@ func TestProperty23SuccessFormat_PBT(t *testing.T) {
 		if result["code"] == nil {
 			t.Error("expected 'code' field in response")
 		}
-		if result["message"] == nil {
-			t.Error("expected 'message' field in response")
+		if result["msg"] == nil {
+			t.Error("expected 'msg' field in response")
 		}
 		if result["data"] == nil {
 			t.Error("expected 'data' field in response")

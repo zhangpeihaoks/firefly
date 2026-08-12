@@ -290,8 +290,10 @@ func (s *Server) createGinHandler(handler middleware.Handler, ms ...middleware.M
 		// Call wrapped handler
 		resp, err := wrappedHandler(ctx, c.Request)
 		if err != nil {
-			// TODO: Handle error response properly
-			c.JSON(500, gin.H{"error": err.Error()})
+			// Handle errors through the unified error handling:
+			// maps *errors.Error to its HTTP status code and masks generic
+			// errors as 500 without leaking internal details.
+			GetResponse().HandleError(c, err)
 			return
 		}
 

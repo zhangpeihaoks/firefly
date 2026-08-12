@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -362,30 +363,43 @@ func TestRunWithNoServers(t *testing.T) {
 	}
 }
 
-// TestDefaultSignals tests that default signals include SIGINT and SIGTERM
+// TestDefaultSignals tests the default signal set.
+// SIGINT (Ctrl+C) must always be present; SIGTERM is Unix-only by design
+// (see app_restart_unix.go), so Windows defaults to SIGINT alone.
 func TestDefaultSignals(t *testing.T) {
 	app := New()
-	if len(app.opts.sigs) != 2 {
-		t.Errorf("expected 2 default signals, got %d", len(app.opts.sigs))
+	if len(app.opts.sigs) == 0 {
+		t.Fatal("expected at least 1 default signal")
 	}
 
-	// Check that both SIGINT and SIGTERM are in the default signals
+	// SIGINT must always be present: Ctrl+C is universal across platforms.
 	hasSIGINT := false
-	hasSIGTERM := false
 	for _, sig := range app.opts.sigs {
 		if sig == os.Interrupt {
 			hasSIGINT = true
 		}
+	}
+	if !hasSIGINT {
+		t.Error("SIGINT not in default signals")
+	}
+
+	// On Windows the default set is exactly SIGINT.
+	if runtime.GOOS == "windows" {
+		if len(app.opts.sigs) != 1 {
+			t.Errorf("expected 1 default signal on Windows, got %d", len(app.opts.sigs))
+		}
+		return
+	}
+
+	// On Unix, SIGTERM is added alongside SIGINT (SIGINT + SIGTERM).
+	hasSIGTERM := false
+	for _, sig := range app.opts.sigs {
 		if sig == syscall.SIGTERM {
 			hasSIGTERM = true
 		}
 	}
-
-	if !hasSIGINT {
-		t.Error("SIGINT not in default signals")
-	}
 	if !hasSIGTERM {
-		t.Error("SIGTERM not in default signals")
+		t.Error("SIGTERM not in default signals on Unix")
 	}
 }
 

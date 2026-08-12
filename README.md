@@ -464,7 +464,7 @@ server.Route(http.MethodGet, "/users", func(ctx context.Context, req any) (any, 
 // 响应格式：
 // {
 //   "code": 200,
-//   "message": "success",
+//   "msg": "success",
 //   "data": { ... }
 // }
 ```

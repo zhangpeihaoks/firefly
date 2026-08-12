@@ -1,8 +1,11 @@
 package http
 
 import (
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -79,6 +82,11 @@ func TestResponse_HandleError(t *testing.T) {
 			err:            errors.New(418, "TEAPOT", "I'm a teapot"),
 			expectedStatus: 418, // Custom status code
 		},
+		{
+			name:           "non-framework error",
+			err:            fmt.Errorf("database connection failed: secret internal detail"),
+			expectedStatus: http.StatusInternalServerError,
+		},
 	}
 
 	for _, tt := range tests {
@@ -98,6 +106,18 @@ func TestResponse_HandleError(t *testing.T) {
 			// Check response
 			if w.Code != tt.expectedStatus {
 				t.Errorf("expected status %d, got %d", tt.expectedStatus, w.Code)
+			}
+
+			// Non-framework errors must not leak internal details to the client.
+			// The response body should use the generic internal error message.
+			if _, isFrameworkErr := tt.err.(*errors.Error); !isFrameworkErr {
+				body, _ := io.ReadAll(w.Body)
+				if strings.Contains(string(body), tt.err.Error()) {
+					t.Errorf("response body leaked internal error details: %s", body)
+				}
+				if !strings.Contains(string(body), "内部服务错误") {
+					t.Errorf("expected generic internal error message in body, got: %s", body)
+				}
 			}
 		})
 	}

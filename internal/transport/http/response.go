@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/zhangpeihaoks/firefly/internal/errors"
+	"github.com/zhangpeihaoks/firefly/internal/log"
 	"github.com/zhangpeihaoks/firefly/pkg/response"
 )
 
@@ -125,8 +126,19 @@ func (r *Response) HandleError(c *gin.Context, err error) {
 		return
 	}
 
-	// Convert to framework error
+	// Convert to framework error.
 	fwErr := errors.FromError(err)
+
+	// Generic (non-framework) errors are treated as internal errors:
+	// mask internal details in the response and log the full error server-side.
+	if _, isFrameworkErr := err.(*errors.Error); !isFrameworkErr {
+		log.L().Error("http handler returned unhandled error",
+			"method", c.Request.Method,
+			"path", c.Request.URL.Path,
+			"error", err,
+		)
+		fwErr = errors.ErrInternal
+	}
 
 	// Map error code to HTTP status
 	status := errors.ToHTTPStatus(int(fwErr.Code))
@@ -162,12 +174,12 @@ func (r *Response) HandleSuccess(c *gin.Context, data any, err error) {
 }
 
 // JSONResponse sends a JSON response using the unified response structure.
-func JSONResponse(c *gin.Context, status int, resp *response.Response) {
+func JSONResponse[T any](c *gin.Context, status int, resp *response.Response[T]) {
 	c.JSON(status, resp)
 }
 
 // PageResponse sends a paginated JSON response.
-func PageResponse(c *gin.Context, status int, resp *response.PageResponse) {
+func PageResponse[T any](c *gin.Context, status int, resp *response.PageResponse[T]) {
 	c.JSON(status, resp)
 }
 
