@@ -69,23 +69,28 @@ type consulCheck struct {
 	DeregisterCriticalServiceAfter time.Duration
 }
 
-// NewRegistrar creates a new Consul registrar.
-func NewRegistrar(config *RegistrarConfig, opts ...RegistrarOption) *Registrar {
+// NewRegistrar creates a new Consul registrar backed by the real Consul API
+// client. Tests can inject a mock via WithClient.
+func NewRegistrar(config *RegistrarConfig, opts ...RegistrarOption) (*Registrar, error) {
 	r := &Registrar{
 		config:    config,
 		logger:    slog.Default(),
 		instances: make(map[string]bool),
 	}
 
-	// Initialize default client (can be overridden by options)
-	r.client = &mockClient{}
+	// Default to the real Consul API client.
+	client, err := NewClient(config)
+	if err != nil {
+		return nil, err
+	}
+	r.client = client
 
 	// Apply options (may override default client)
 	for _, opt := range opts {
 		opt(r)
 	}
 
-	return r
+	return r, nil
 }
 
 // RegistrarOption is a function that configures the Registrar.

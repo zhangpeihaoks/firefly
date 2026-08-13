@@ -46,23 +46,28 @@ type ServiceClient interface {
 	Watch(ctx context.Context, serviceName string, lastIndex uint64) ([]*consulServiceInstance, uint64, error)
 }
 
-// NewDiscovery creates a new Consul discovery instance.
-func NewDiscovery(config *DiscoveryConfig, opts ...DiscoveryOption) *Discovery {
+// NewDiscovery creates a new Consul discovery instance backed by the real
+// Consul API client. Tests can inject a mock via WithServiceClient.
+func NewDiscovery(config *DiscoveryConfig, opts ...DiscoveryOption) (*Discovery, error) {
 	d := &Discovery{
 		config:   config,
 		logger:   slog.Default(),
 		watchers: make(map[string][]*consulWatcher),
 	}
 
-	// Initialize default client (can be overridden by options)
-	d.client = &mockServiceClient{}
+	// Default to the real Consul API client.
+	client, err := NewServiceClient(config)
+	if err != nil {
+		return nil, err
+	}
+	d.client = client
 
 	// Apply options (may override default client)
 	for _, opt := range opts {
 		opt(d)
 	}
 
-	return d
+	return d, nil
 }
 
 // DiscoveryOption is a function that configures the Discovery.

@@ -1,4 +1,4 @@
-package consul
+﻿package consul
 
 import (
 	"context"
@@ -18,7 +18,8 @@ func TestDiscovery_GetService(t *testing.T) {
 		PollInterval: 1 * time.Second,
 	}
 
-	d := NewDiscovery(config)
+	d, err := NewDiscovery(config, WithServiceClient(&mockServiceClient{}))
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	// Get service that doesn't exist (should return empty list)
@@ -54,7 +55,8 @@ func TestDiscovery_GetService_WithMockClient(t *testing.T) {
 		PollInterval: 1 * time.Second,
 	}
 
-	d := NewDiscovery(config, WithServiceClient(mockClient))
+	d, err := NewDiscovery(config, WithServiceClient(mockClient))
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	instances, err := d.GetService(ctx, "user-service")
@@ -87,7 +89,8 @@ func TestDiscovery_Watch(t *testing.T) {
 		PollInterval: 100 * time.Millisecond,
 	}
 
-	d := NewDiscovery(config, WithServiceClient(mockClient))
+	d, err := NewDiscovery(config, WithServiceClient(mockClient))
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	watcher, err := d.Watch(ctx, "test-service")
@@ -119,7 +122,8 @@ func TestDiscovery_Watch_Stop(t *testing.T) {
 		PollInterval: 100 * time.Millisecond,
 	}
 
-	d := NewDiscovery(config, WithServiceClient(mockClient))
+	d, err := NewDiscovery(config, WithServiceClient(mockClient))
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	watcher, err := d.Watch(ctx, "test-service")
@@ -179,7 +183,8 @@ func TestToRegistryInstance(t *testing.T) {
 		Address: "localhost:8500",
 	}
 
-	d := NewDiscovery(config)
+	d, err := NewDiscovery(config, WithServiceClient(&mockServiceClient{}))
+	require.NoError(t, err)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -251,7 +256,8 @@ func TestRegistrar_Property_ServiceRegistration(t *testing.T) {
 		Timeout: 5 * time.Second,
 	}
 
-	r := NewRegistrar(config, WithClient(mockClient))
+	r, err := NewRegistrar(config, WithClient(mockClient))
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	// Test service registration
@@ -267,7 +273,7 @@ func TestRegistrar_Property_ServiceRegistration(t *testing.T) {
 	}
 
 	// Register should succeed
-	err := r.Register(ctx, service)
+	err = r.Register(ctx, service)
 	require.NoError(t, err, "Service registration should succeed")
 
 	// Verify the service was registered with the mock

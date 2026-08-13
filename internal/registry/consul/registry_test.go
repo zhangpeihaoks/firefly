@@ -68,9 +68,10 @@ func TestRegistrar_Register(t *testing.T) {
 				Timeout: 5 * time.Second,
 			}
 
-			r := NewRegistrar(config)
+			r, err := NewRegistrar(config, WithClient(&mockClient{}))
+			require.NoError(t, err)
 			ctx := context.Background()
-			err := r.Register(ctx, tt.service)
+			err = r.Register(ctx, tt.service)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -130,14 +131,15 @@ func TestRegistrar_Deregister(t *testing.T) {
 				Timeout: 5 * time.Second,
 			}
 
-			r := NewRegistrar(config)
+			r, err := NewRegistrar(config, WithClient(&mockClient{}))
+			require.NoError(t, err)
 			ctx := context.Background()
 
 			if tt.register {
 				require.NoError(t, r.Register(ctx, tt.service))
 			}
 
-			err := r.Deregister(ctx, tt.service)
+			err = r.Deregister(ctx, tt.service)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -154,7 +156,8 @@ func TestRegistrar_DoubleRegister(t *testing.T) {
 		Timeout: 5 * time.Second,
 	}
 
-	r := NewRegistrar(config)
+	r, err := NewRegistrar(config, WithClient(&mockClient{}))
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	service := &registry.ServiceInstance{
@@ -180,7 +183,8 @@ func TestRegistrar_CustomClient(t *testing.T) {
 		Timeout: 5 * time.Second,
 	}
 
-	r := NewRegistrar(config, WithClient(mockClient))
+	r, err := NewRegistrar(config, WithClient(mockClient))
+	require.NoError(t, err)
 	ctx := context.Background()
 
 	service := &registry.ServiceInstance{
@@ -191,7 +195,7 @@ func TestRegistrar_CustomClient(t *testing.T) {
 	}
 
 	// Registration should fail due to mock client error
-	err := r.Register(ctx, service)
+	err = r.Register(ctx, service)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "connection refused")
 }
@@ -258,7 +262,8 @@ func TestToConsulInstance(t *testing.T) {
 				Timeout: 5 * time.Second,
 			}
 
-			r := NewRegistrar(config)
+			r, err := NewRegistrar(config, WithClient(&mockClient{}))
+			require.NoError(t, err)
 			instance, err := r.toConsulInstance(tt.service)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedAddress, instance.Address)
