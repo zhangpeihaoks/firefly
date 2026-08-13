@@ -23,6 +23,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "./config/config.yaml", "configuration file path")
+	remoteConfig := flag.String("remote-config", "", "remote config data source URL, e.g. consul://127.0.0.1:8500/config/my-service or file:///etc/app/config.yaml")
 	flag.Parse()
 
 	cfg := conf.DefaultBootstrap()
@@ -30,6 +31,16 @@ func main() {
 	if err := c.Load(*configPath, cfg); err != nil {
 		fmt.Printf("failed to load config: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Load remote configuration (config center) if a data source URL is provided.
+	// Remote values override the local file; changes trigger hot-reload.
+	if *remoteConfig != "" {
+		if err := c.LoadFromDataSource(context.Background(), *remoteConfig, cfg); err != nil {
+			fmt.Printf("failed to load remote config: %v\n", err)
+			os.Exit(1)
+		}
+		slog.Info("remote config attached", "source", *remoteConfig)
 	}
 
 	cleanup := log.New(&log.Config{

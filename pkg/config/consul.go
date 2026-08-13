@@ -5,12 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	consulapi "github.com/hashicorp/consul/api"
 )
+
+func init() {
+	RegisterSource("consul", newConsulSourceFromURL)
+}
 
 // ConsulSource is a RemoteSource backed by Consul KV.
 //
@@ -191,4 +197,41 @@ func insertNested(m map[string]any, parts []string, value any) {
 		m[parts[0]] = child
 	}
 	insertNested(child, parts[1:], value)
+}
+
+// newConsulSourceFromURL builds a ConsulSource from a consul:// URL.
+//
+//	consul://127.0.0.1:8500/config/my-service?token=xxx&namespace=ns&watch_time=10s
+func newConsulSourceFromURL(_ context.Context, u *url.URL) (RemoteSource, error) {
+	q := u.Query()
+
+	watchTime, err := parseDurationQuery(q.Get("watch_time"), 10*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("consul source: %w", err)
+	}
+
+	return NewConsulSource(ConsulSourceConfig{
+		Address:   u.Host,
+		Token:     q.Get("token"),
+		Namespace: q.Get("namespace"),
+		Partition: q.Get("partition"),
+		Prefix:    strings.TrimPrefix(u.Path, "/"),
+		WatchTime: watchTime,
+	})
+}
+
+// parseDurationQuery parses a duration query parameter with a default value.
+func parseDurationQuery(raw string, fallback time.Duration) (time.Duration, error) {
+	if raw == "" {
+		return fallback, nil
+	}
+	sec, err := strconv.Atoi(raw)
+	if err == nil {
+		return time.Duration(sec) * time.Second, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid duration %q", raw)
+	}
+	return d, nil
 }
