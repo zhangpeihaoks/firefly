@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zhangpeihaoks/firefly/internal/errors"
+	"github.com/zhangpeihaoks/firefly/internal/ratelimit"
 	"github.com/zhangpeihaoks/firefly/internal/transport"
 )
 
@@ -305,12 +306,14 @@ type KeyExtractor func(ctx context.Context, tr transport.Transporter) string
 
 // ratelimitOptions holds the configuration for RateLimit middleware.
 type ratelimitOptions struct {
-	logger         *slog.Logger
-	limiter        RateLimiter
-	limiterFactory func(key string) RateLimiter
-	keyExtractor   KeyExtractor
-	skipPaths      map[string]bool
-	retryAfter     bool
+	logger            *slog.Logger
+	limiter           RateLimiter
+	limiterFactory    func(key string) RateLimiter
+	redisLimiter      ratelimit.RedisLimiter
+	redisKeyExtractor KeyExtractor
+	keyExtractor      KeyExtractor
+	skipPaths         map[string]bool
+	retryAfter        bool
 }
 
 // RateLimitOption is a configuration option for RateLimit middleware.
@@ -338,6 +341,31 @@ func WithRateLimiter(limiter RateLimiter) RateLimitOption {
 func WithLimiterFactory(factory func(key string) RateLimiter) RateLimitOption {
 	return func(o *ratelimitOptions) {
 		o.limiterFactory = factory
+	}
+}
+
+// WithRedisRateLimiter sets a distributed (Redis-backed) rate limiter.
+// The limit state is shared across all service instances. The key is extracted
+// with WithKeyExtractor (default: client IP).
+//
+// Example:
+//
+//	rdb := redisClient.Client() // github.com/redis/go-redis client
+//	limiter := ratelimit.NewRedisTokenBucketLimiter(rdb, ratelimit.RedisTokenBucketConfig{Rate: 100, Burst: 200})
+//	middleware.RateLimit(middleware.WithRedisRateLimiter(limiter))
+func WithRedisRateLimiter(limiter ratelimit.RedisLimiter) RateLimitOption {
+	return func(o *ratelimitOptions) {
+		o.redisLimiter = limiter
+		o.redisKeyExtractor = defaultKeyExtractor
+	}
+}
+
+// WithRedisRateLimiterAndExtractor sets a distributed rate limiter with a
+// custom key extractor.
+func WithRedisRateLimiterAndExtractor(limiter ratelimit.RedisLimiter, extractor KeyExtractor) RateLimitOption {
+	return func(o *ratelimitOptions) {
+		o.redisLimiter = limiter
+		o.redisKeyExtractor = extractor
 	}
 }
 
@@ -419,6 +447,28 @@ func RateLimit(opts ...RateLimitOption) Middleware {
 			var limiter RateLimiter
 			var key string
 
+			// Distributed (Redis) rate limiting — state shared across instances.
+			if options.redisLimiter != nil {
+				key = options.redisKeyExtractor(ctx, tr)
+				allowed, err := options.redisLimiter.Allow(ctx, key)
+				if err != nil {
+					// Fail-closed backend: refuse the request rather than
+					// bypassing the limit. Fail-open limiters swallow errors
+					// internally and return allowed=true.
+					options.logger.Error("redis rate limit check failed", "key", key, "error", err)
+					return nil, errors.New(errors.CodeServiceUnavailable, "RATE_LIMIT_UNAVAILABLE", "限流服务暂时不可用")
+				}
+				if !allowed {
+					options.logger.Warn("rate limit exceeded", "key", key, "operation", operationName(tr))
+					err := errors.New(errors.CodeServiceUnavailable, "RATE_LIMIT_EXCEEDED", "请求频率超限，请稍后重试")
+					if options.retryAfter {
+						err = err.WithMetadata(map[string]string{"retry_after": "1"})
+					}
+					return nil, err
+				}
+				return next(ctx, req)
+			}
+
 			// Use global limiter or per-key limiter
 			if options.limiter != nil {
 				limiter = options.limiter
@@ -444,12 +494,7 @@ func RateLimit(opts ...RateLimitOption) Middleware {
 				// Log rate limit exceeded
 				options.logger.Warn("rate limit exceeded",
 					"key", key,
-					"operation", func() string {
-						if tr != nil {
-							return tr.Operation()
-						}
-						return ""
-					}(),
+					"operation", operationName(tr),
 				)
 
 				// Return rate limit error
@@ -466,6 +511,14 @@ func RateLimit(opts ...RateLimitOption) Middleware {
 			return next(ctx, req)
 		}
 	}
+}
+
+// operationName returns the transport operation name for logging.
+func operationName(tr transport.Transporter) string {
+	if tr != nil {
+		return tr.Operation()
+	}
+	return ""
 }
 
 // defaultKeyExtractor extracts the client IP as the rate limit key.

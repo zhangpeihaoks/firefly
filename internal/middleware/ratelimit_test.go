@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/zhangpeihaoks/firefly/internal/errors"
+	"github.com/zhangpeihaoks/firefly/internal/ratelimit"
 	"github.com/zhangpeihaoks/firefly/internal/transport"
 )
 
@@ -564,4 +567,68 @@ type testWriter struct {
 func (w *testWriter) Write(p []byte) (n int, err error) {
 	*w.buf = append(*w.buf, p...)
 	return len(p), nil
+}
+
+// TestRateLimitMiddleware_Redis tests distributed (Redis) rate limiting.
+func TestRateLimitMiddleware_Redis(t *testing.T) {
+	m := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: m.Addr()})
+	defer rdb.Close()
+
+	limiter := ratelimit.NewRedisFixedWindowLimiter(rdb, ratelimit.RedisFixedWindowConfig{
+		Limit: 2, Window: time.Minute,
+	})
+
+	mid := RateLimit(WithRedisRateLimiter(limiter))
+
+	var count atomic.Int32
+	handler := mid(func(ctx context.Context, req any) (any, error) {
+		count.Add(1)
+		return "ok", nil
+	})
+
+	ctx := transport.NewContext(context.Background(), &mockTransporter{
+		kind:          transport.KindHTTP,
+		endpoint:      "http://localhost:8080",
+		operation:     "/api/test",
+		requestHeader: &mockHeader{values: map[string]string{"X-Real-IP": "10.0.0.1"}},
+		replyHeader:   newMockHeader(),
+	})
+
+	// First two requests allowed.
+	for i := 0; i < 2; i++ {
+		if _, err := handler(ctx, nil); err != nil {
+			t.Errorf("request %d: unexpected error: %v", i, err)
+		}
+	}
+
+	// Third request rate limited (RATE_LIMIT_EXCEEDED).
+	_, err := handler(ctx, nil)
+	if err == nil {
+		t.Fatal("expected rate limit error")
+	}
+	if fwErr, ok := stderrors.AsType[*errors.Error](err); ok {
+		if fwErr.Reason != "RATE_LIMIT_EXCEEDED" {
+			t.Errorf("expected reason RATE_LIMIT_EXCEEDED, got %s", fwErr.Reason)
+		}
+	} else {
+		t.Errorf("expected *errors.Error, got %T", err)
+	}
+
+	// Only 2 requests processed.
+	if count.Load() != 2 {
+		t.Errorf("expected 2 requests processed, got %d", count.Load())
+	}
+
+	// A different key (another client IP) is not limited.
+	ctx2 := transport.NewContext(context.Background(), &mockTransporter{
+		kind:          transport.KindHTTP,
+		endpoint:      "http://localhost:8080",
+		operation:     "/api/test",
+		requestHeader: &mockHeader{values: map[string]string{"X-Real-IP": "10.0.0.2"}},
+		replyHeader:   newMockHeader(),
+	})
+	if _, err := handler(ctx2, nil); err != nil {
+		t.Errorf("expected different key to be allowed, got error: %v", err)
+	}
 }
