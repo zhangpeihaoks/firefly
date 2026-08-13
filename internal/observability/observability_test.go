@@ -1,4 +1,4 @@
-package observability
+﻿package observability
 
 import (
 	"context"
@@ -8,13 +8,13 @@ import (
 )
 
 func TestInit_DisabledTracing(t *testing.T) {
-	shutdown, err := Init(context.Background(), Config{
+	obs, err := Init(context.Background(), Config{
 		ServiceName: "test-svc",
 	})
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
-	defer shutdown()
+	defer obs.Shutdown()
 
 	// No tracer configured: convenience APIs return empty IDs.
 	if id := TraceID(context.Background()); id != "" {
@@ -28,7 +28,7 @@ func TestInit_DisabledTracing(t *testing.T) {
 func TestInit_StdoutTracer(t *testing.T) {
 	// stdout exporter avoids external dependencies while exercising the
 	// full provider setup path.
-	shutdown, err := Init(context.Background(), Config{
+	obs, err := Init(context.Background(), Config{
 		ServiceName: "test-svc",
 		Tracing: TracingConfig{
 			Enabled:      true,
@@ -38,7 +38,7 @@ func TestInit_StdoutTracer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
-	defer shutdown()
+	defer obs.Shutdown()
 
 	ctx, span := StartSpan(context.Background(), "test-operation")
 	defer span.End()

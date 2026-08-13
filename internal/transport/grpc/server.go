@@ -47,6 +47,7 @@ type Server struct {
 	address        string
 	timeout        time.Duration
 	ms             []middleware.Middleware
+	noDefaultMW    bool
 	handlers       map[string]Handler
 	mu             sync.RWMutex
 	log            *slog.Logger
@@ -78,6 +79,12 @@ func NewServer(opts ...ServerOption) *Server {
 	// Apply options
 	for _, opt := range opts {
 		opt(s)
+	}
+
+	// Zero-configuration observability: install the default chain unless the
+	// caller supplied explicit middleware or opted out.
+	if len(s.ms) == 0 && !s.noDefaultMW {
+		s.ms = middleware.DefaultObservabilityChain()
 	}
 
 	// Build gRPC server options
@@ -409,9 +416,19 @@ func Timeout(timeout time.Duration) ServerOption {
 }
 
 // Middleware sets the middleware for the gRPC server.
+// When no middleware is provided, the default observability chain
+// (RequestID/Recovery/Logging/Tracing/Metrics) is installed automatically.
 func Middleware(m ...middleware.Middleware) ServerOption {
 	return func(s *Server) {
 		s.ms = m
+	}
+}
+
+// WithoutDefaultMiddleware disables the automatic default observability
+// chain. Only relevant when no explicit middleware is supplied.
+func WithoutDefaultMiddleware() ServerOption {
+	return func(s *Server) {
+		s.noDefaultMW = true
 	}
 }
 

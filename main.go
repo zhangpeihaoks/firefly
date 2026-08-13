@@ -15,8 +15,10 @@ import (
 	"github.com/zhangpeihaoks/firefly/internal/health"
 	"github.com/zhangpeihaoks/firefly/internal/log"
 	"github.com/zhangpeihaoks/firefly/internal/middleware"
+	"github.com/zhangpeihaoks/firefly/internal/observability"
 	"github.com/zhangpeihaoks/firefly/internal/registry"
 	"github.com/zhangpeihaoks/firefly/internal/registry/consul"
+	"github.com/zhangpeihaoks/firefly/internal/tracing"
 	httptransport "github.com/zhangpeihaoks/firefly/internal/transport/http"
 	"github.com/zhangpeihaoks/firefly/pkg/config"
 )
@@ -43,16 +45,31 @@ func main() {
 		slog.Info("remote config attached", "source", *remoteConfig)
 	}
 
-	cleanup := log.New(&log.Config{
-		FileName:   cfg.Log.FileName,
-		MaxSize:    cfg.Log.MaxSize,
-		MaxBackups: cfg.Log.MaxBackups,
-		MaxAge:     cfg.Log.MaxAge,
-		Level:      cfg.Log.Level,
-		JSONFormat: cfg.Log.JSONFormat,
-		Location:   cfg.Log.Location,
+	// First-class observability: one call wires logger (JSON + rotation +
+	// trace correlation) and the OpenTelemetry tracer provider.
+	obs, err := observability.Init(context.Background(), observability.Config{
+		ServiceName: cfg.Name,
+		Log: &log.Config{
+			FileName:   cfg.Log.FileName,
+			MaxSize:    cfg.Log.MaxSize,
+			MaxBackups: cfg.Log.MaxBackups,
+			MaxAge:     cfg.Log.MaxAge,
+			Level:      cfg.Log.Level,
+			JSONFormat: cfg.Log.JSONFormat,
+			Location:   cfg.Log.Location,
+		},
+		Tracing: observability.TracingConfig{
+			Enabled:      cfg.Tracing != nil && cfg.Tracing.Enabled,
+			Endpoint:     traceEndpoint(cfg),
+			ExporterType: tracing.ExporterOTLP,
+			SamplerRatio: cfg.Tracing.SamplerRatio,
+		},
 	})
-	defer cleanup()
+	if err != nil {
+		fmt.Printf("failed to init observability: %v\n", err)
+		os.Exit(1)
+	}
+	defer obs.Shutdown()
 
 	logger := slog.Default()
 	logger.Info("firefly server starting", "name", cfg.Name, "version", cfg.Version)
@@ -76,6 +93,14 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("firefly server stopped gracefully")
+}
+
+// traceEndpoint safely returns the configured tracing endpoint.
+func traceEndpoint(cfg *conf.Bootstrap) string {
+	if cfg.Tracing == nil {
+		return ""
+	}
+	return cfg.Tracing.Endpoint
 }
 
 // buildAppOptions assembles application options from configuration.

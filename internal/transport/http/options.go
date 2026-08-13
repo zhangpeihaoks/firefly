@@ -53,9 +53,19 @@ func IdleTimeout(timeout time.Duration) ServerOption {
 }
 
 // Middleware sets the global middleware for the server.
+// When no middleware is provided, the default observability chain
+// (RequestID/Recovery/Logging/Tracing/Metrics) is installed automatically.
 func Middleware(m ...middleware.Middleware) ServerOption {
 	return func(s *Server) {
 		s.ms = append(s.ms, m...)
+	}
+}
+
+// WithoutDefaultMiddleware disables the automatic default observability
+// chain. Only relevant when no explicit middleware is supplied.
+func WithoutDefaultMiddleware() ServerOption {
+	return func(s *Server) {
+		s.noDefaultMW = true
 	}
 }
 

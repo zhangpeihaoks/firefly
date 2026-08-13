@@ -44,6 +44,7 @@ type Server struct {
 	timeout          time.Duration
 	maxRequestSize   int64
 	ms               []middleware.Middleware
+	noDefaultMW      bool
 	router           *gin.Engine
 	log              *slog.Logger
 	tlsConf          *tls.Config
@@ -74,6 +75,12 @@ func NewServer(opts ...ServerOption) *Server {
 	// Apply options
 	for _, opt := range opts {
 		opt(s)
+	}
+
+	// Zero-configuration observability: install the default chain unless the
+	// caller supplied explicit middleware or opted out.
+	if len(s.ms) == 0 && !s.noDefaultMW {
+		s.ms = middleware.DefaultObservabilityChain()
 	}
 
 	// Create HTTP server

@@ -32,7 +32,8 @@ func TestHandleAPI(t *testing.T) {
 
 // TestUseAPI tests the Use method appends middleware.
 func TestUseAPI(t *testing.T) {
-	srv := NewServer()
+	// WithoutDefaultMiddleware: this test verifies Use() append semantics.
+	srv := NewServer(WithoutDefaultMiddleware())
 
 	m1 := func(next Handler) Handler {
 		return func(ctx context.Context, req any) (any, error) {

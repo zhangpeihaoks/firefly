@@ -3,6 +3,7 @@ package middleware
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -10,6 +11,17 @@ import (
 	"github.com/zhangpeihaoks/firefly/internal/errors"
 	"github.com/zhangpeihaoks/firefly/internal/metrics"
 	"github.com/zhangpeihaoks/firefly/internal/transport"
+)
+
+// promauto panics when a collector is registered twice (it is not
+// idempotent), and Metrics() may be invoked once per server. These package
+// variables cache the default collectors so multiple servers share one
+// registration.
+var (
+	defaultMetricsOnce  sync.Once
+	defaultCounter      *prometheus.CounterVec
+	defaultLatency      *prometheus.HistogramVec
+	defaultErrorCount   *prometheus.CounterVec
 )
 
 const (
@@ -123,6 +135,58 @@ func Metrics(opts ...MetricsOption) Middleware {
 		opt(options)
 	}
 
+	// Use the cached default collectors when nothing is customized, so
+	// multiple servers can share the default registry without a duplicate
+	// registration panic (promauto is not idempotent). Note: the zero
+	// metricsOptions already holds DefaultRegistry/DefaultBuckets, so detect
+	// "default" by comparison, not by nil.
+	if isDefaultMetricsConfig(options) {
+		defaultMetricsOnce.Do(func() {
+			factory := promauto.With(metrics.DefaultRegistry())
+			defaultCounter = factory.NewCounterVec(
+				prometheus.CounterOpts{
+					Namespace: namespace,
+					Subsystem: subsystem,
+					Name:      "requests_total",
+					Help:      "Total number of requests by method, path, and status.",
+				},
+				[]string{"kind", "method", "path", "status"},
+			)
+			defaultLatency = factory.NewHistogramVec(
+				prometheus.HistogramOpts{
+					Namespace: namespace,
+					Subsystem: subsystem,
+					Name:      "request_duration_seconds",
+					Help:      "Request latency in seconds by method and path.",
+					Buckets:   DefaultBuckets,
+				},
+				[]string{"kind", "method", "path"},
+			)
+			defaultErrorCount = factory.NewCounterVec(
+				prometheus.CounterOpts{
+					Namespace: namespace,
+					Subsystem: subsystem,
+					Name:      "errors_total",
+					Help:      "Total number of errors by method, path, and error code.",
+				},
+				[]string{"kind", "method", "path", "code"},
+			)
+		})
+		options.registry = metrics.DefaultRegistry()
+		options.counter = defaultCounter
+		options.latency = defaultLatency
+		options.errorCount = defaultErrorCount
+		return func(next Handler) Handler {
+			return metricsHandler(options, next)
+		}
+	}
+
+	// Customized metrics: build per-call (callers should use a dedicated
+	// registry when customizing).
+	if options.registry == nil {
+		options.registry = metrics.DefaultRegistry()
+	}
+
 	// Create metrics if not provided
 	factory := promauto.With(options.registry)
 
@@ -164,54 +228,77 @@ func Metrics(opts ...MetricsOption) Middleware {
 	}
 
 	return func(next Handler) Handler {
-		return func(ctx context.Context, req any) (any, error) {
-			// Record start time
-			startTime := time.Now()
+		return metricsHandler(options, next)
+	}
+}
 
-			// Get transport info from context
-			tr := transport.FromContext(ctx)
-
-			// Extract labels
-			var kind, method, path string
-			if tr != nil {
-				kind = string(tr.Kind())
-				method = tr.Operation()
-				path = tr.Operation()
-			} else {
-				kind = "unknown"
-				method = "unknown"
-				path = "unknown"
-			}
-
-			// Call the next handler
-			resp, err := next(ctx, req)
-
-			// Calculate latency
-			latency := time.Since(startTime).Seconds()
-
-			// Determine status code
-			statusCode := "200"
-			if err != nil {
-				statusCode = "500"
-				if e, ok := err.(*errors.Error); ok {
-					statusCode = e.Reason
-				}
-			}
-
-			// Record metrics
-			options.counter.WithLabelValues(kind, method, path, statusCode).Inc()
-			options.latency.WithLabelValues(kind, method, path).Observe(latency)
-
-			// Record error if occurred
-			if err != nil {
-				errorCode := "unknown"
-				if e, ok := err.(*errors.Error); ok {
-					errorCode = e.Reason
-				}
-				options.errorCount.WithLabelValues(kind, method, path, errorCode).Inc()
-			}
-
-			return resp, err
+// isDefaultMetricsConfig reports whether the options are untouched defaults
+// (default registry + default buckets), which share the cached collectors.
+func isDefaultMetricsConfig(o *metricsOptions) bool {
+	if o.registry != metrics.DefaultRegistry() {
+		return false
+	}
+	if len(o.buckets) != len(DefaultBuckets) {
+		return false
+	}
+	for i := range o.buckets {
+		if o.buckets[i] != DefaultBuckets[i] {
+			return false
 		}
+	}
+	return true
+}
+
+// metricsHandler builds the request-counting handler shared by the default
+// and customized metrics middlewares.
+func metricsHandler(options *metricsOptions, next Handler) Handler {
+	return func(ctx context.Context, req any) (any, error) {
+		// Record start time
+		startTime := time.Now()
+
+		// Get transport info from context
+		tr := transport.FromContext(ctx)
+
+		// Extract labels
+		var kind, method, path string
+		if tr != nil {
+			kind = string(tr.Kind())
+			method = tr.Operation()
+			path = tr.Operation()
+		} else {
+			kind = "unknown"
+			method = "unknown"
+			path = "unknown"
+		}
+
+		// Call the next handler
+		resp, err := next(ctx, req)
+
+		// Calculate latency
+		latency := time.Since(startTime).Seconds()
+
+		// Determine status code
+		statusCode := "200"
+		if err != nil {
+			statusCode = "500"
+			if e, ok := err.(*errors.Error); ok {
+				statusCode = e.Reason
+			}
+		}
+
+		// Record metrics
+		options.counter.WithLabelValues(kind, method, path, statusCode).Inc()
+		options.latency.WithLabelValues(kind, method, path).Observe(latency)
+
+		// Record error if occurred
+		if err != nil {
+			errorCode := "unknown"
+			if e, ok := err.(*errors.Error); ok {
+				errorCode = e.Reason
+			}
+			options.errorCount.WithLabelValues(kind, method, path, errorCode).Inc()
+		}
+
+		return resp, err
 	}
 }

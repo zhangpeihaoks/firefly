@@ -18,6 +18,7 @@ import (
 	"log/slog"
 
 	"github.com/zhangpeihaoks/firefly/internal/log"
+	"github.com/zhangpeihaoks/firefly/internal/middleware"
 	"github.com/zhangpeihaoks/firefly/internal/tracing"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -51,10 +52,17 @@ type Config struct {
 	Tracing TracingConfig
 }
 
+// Observability is the initialized observability SDK handle. It carries the
+// configured tracer provider and convenience methods for wiring servers.
+type Observability struct {
+	serviceName string
+	shutdown    func()
+}
+
 // Init wires logging and distributed tracing from the config and installs
-// them as globals. It returns a shutdown function that must be called on
-// application exit (flush spans, close log file).
-func Init(ctx context.Context, cfg Config) (func(), error) {
+// them as globals. Call Shutdown on application exit (flush spans, close log
+// file).
+func Init(ctx context.Context, cfg Config) (*Observability, error) {
 	// 1. Logger (JSON + rotation + context correlation).
 	var logCleanup func()
 	if cfg.Log != nil {
@@ -90,14 +98,34 @@ func Init(ctx context.Context, cfg Config) (func(), error) {
 		propagation.Baggage{},
 	))
 
-	return func() {
+	obs := &Observability{serviceName: cfg.ServiceName}
+	obs.shutdown = func() {
 		if err := tp.Shutdown(context.Background()); err != nil {
 			slog.Warn("observability: tracer shutdown failed", "error", err)
 		}
 		if logCleanup != nil {
 			logCleanup()
 		}
-	}, nil
+	}
+	return obs, nil
+}
+
+// Shutdown flushes traces and closes the log file. Safe to call once.
+func (o *Observability) Shutdown() {
+	if o != nil && o.shutdown != nil {
+		o.shutdown()
+	}
+}
+
+// ServiceName returns the configured service name.
+func (o *Observability) ServiceName() string {
+	return o.serviceName
+}
+
+// HTTPMiddleware returns the default observability middleware chain for
+// wiring into HTTP/gRPC servers (see middleware.DefaultObservabilityChain).
+func (o *Observability) HTTPMiddleware() []middleware.Middleware {
+	return middleware.DefaultObservabilityChain()
 }
 
 // StartSpan starts a span as a child of the span in ctx and returns a context

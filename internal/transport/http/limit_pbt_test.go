@@ -188,9 +188,12 @@ func TestRateLimitCorrectness_PBT(t *testing.T) {
 // Feature: backend-server-framework, Property 34: 超时控制
 func TestTimeoutMiddleware_PBT(t *testing.T) {
 	// Test that middleware can be added to the server
+	// (WithoutDefaultMiddleware: this test verifies Use() append semantics,
+	// not the automatic observability chain).
 	s := NewServer(
 		Address(":0"),
 		Timeout(5*time.Second),
+		WithoutDefaultMiddleware(),
 	)
 
 	// Create a limiter and add rate limit middleware
