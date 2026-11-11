@@ -43,16 +43,16 @@ type Option func(o *options)
 
 // options contains all application configuration.
 type options struct {
-	ctx          context.Context
-	name         string
-	metadata     map[string]string
-	logger       *slog.Logger
-	servers      []transport.Server
-	started      func()
-	sigs         []os.Signal
-	stopTimeout  time.Duration
-	restartable  bool
-	restartSig   os.Signal
+	ctx         context.Context
+	name        string
+	metadata    map[string]string
+	logger      *slog.Logger
+	servers     []transport.Server
+	started     func()
+	sigs        []os.Signal
+	stopTimeout time.Duration
+	restartable bool
+	restartSig  os.Signal
 }
 
 // New creates a new App instance with the given options.
@@ -210,8 +210,14 @@ func (a *App) Run() (int, error) {
 		}
 	}
 
-	// Create errgroup with the cancellable context
-	g, ctx := errgroup.WithContext(ctx)
+	// Start all servers concurrently. The group only collects startup
+	// failures: Firefly's transports return from Start once the listener is
+	// open, so g.Wait() returning nil means "every server is listening", not
+	// "every server has exited". Run stays alive on the parent context below,
+	// which is what a signal or cancel() cancels; servers that block inside
+	// Start (the contract app_test.go's mocks demonstrate) keep the group
+	// pending until shutdown, which is equally correct.
+	var g errgroup.Group
 
 	// Start all servers concurrently
 	for _, srv := range a.opts.servers {
@@ -351,9 +357,9 @@ func (a *App) restart(ctx context.Context) error {
 
 	// Spawn new process
 	proc, err := os.StartProcess(execPath, os.Args, &os.ProcAttr{
-		Env:        env,
-		Files:      append([]*os.File{os.Stdin, os.Stdout, os.Stderr}, extraFiles...),
-		Sys:        getSysProcAttr(),
+		Env:   env,
+		Files: append([]*os.File{os.Stdin, os.Stdout, os.Stderr}, extraFiles...),
+		Sys:   getSysProcAttr(),
 	})
 	if err != nil {
 		return fmt.Errorf("restart: cannot start new process: %w", err)

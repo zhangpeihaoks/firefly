@@ -266,6 +266,87 @@ func TestRun(t *testing.T) {
 	}
 }
 
+// nonBlockingMockServer returns from Start immediately, the way Firefly's own
+// HTTP, gRPC and WebSocket transports do: Start opens the listener and the
+// serving happens in a background goroutine.
+type nonBlockingMockServer struct {
+	started chan struct{}
+	stopped chan struct{}
+}
+
+// newNonBlockingMockServer creates a mock whose Start does not block.
+func newNonBlockingMockServer() *nonBlockingMockServer {
+	return &nonBlockingMockServer{
+		started: make(chan struct{}),
+		stopped: make(chan struct{}),
+	}
+}
+
+// Start reports that it is listening and returns.
+func (m *nonBlockingMockServer) Start(ctx context.Context) error {
+	close(m.started)
+	return nil
+}
+
+// Stop reports that it stopped.
+func (m *nonBlockingMockServer) Stop(ctx context.Context) error {
+	close(m.stopped)
+	return nil
+}
+
+// TestRunStaysAliveWithNonBlockingServer pins the contract of Firefly's own
+// transports: Start returns once the listener is open, so Run must keep
+// serving until it is cancelled instead of exiting as soon as Start returns.
+func TestRunStaysAliveWithNonBlockingServer(t *testing.T) {
+	srv := newNonBlockingMockServer()
+	app := New(
+		Server(srv),
+		Logger(slog.Default()),
+	)
+
+	done := make(chan struct{})
+	var exitCode int
+	var err error
+	go func() {
+		exitCode, err = app.Run()
+		close(done)
+	}()
+
+	select {
+	case <-srv.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not start within timeout")
+	}
+
+	// Run must not return while the server is merely listening.
+	select {
+	case <-done:
+		t.Fatal("Run() returned although the server was still serving")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	app.cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not complete within timeout")
+	}
+
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+	if err != nil {
+		t.Errorf("err = %v, want nil", err)
+	}
+
+	select {
+	case <-srv.stopped:
+	case <-time.After(time.Second):
+		t.Error("server was not stopped")
+	}
+}
+
 // TestRunWithStartedCallback tests that the started callback is called
 func TestRunWithStartedCallback(t *testing.T) {
 	callbackCalled := false
