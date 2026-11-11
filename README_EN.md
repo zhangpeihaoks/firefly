@@ -150,6 +150,58 @@ go run main.go
 
 The server will start on `http://localhost:8080`.
 
+## Using Firefly From Another Module
+
+The examples above live inside this repository, so they import `internal/`
+packages directly. A service in its own repository cannot do that: Go's
+internal rule hides `internal/transport/http`, `internal/middleware` and
+`internal/errors` from any package outside this module.
+
+Three public packages cover that case:
+
+| Package | Purpose |
+|---|---|
+| `pkg/server` | HTTP server (`server.New` / `Route` / `Group` / `Start` / `Stop`); the value can be passed to `app.Server` |
+| `pkg/middleware` | `Handler`/`Middleware` types plus `Recovery()` / `Logging()` / `RequestID()` / `Timeout()` / `Chain()` |
+| `pkg/errors` | `New` / `Newf` / `Wrap` and status constants; the HTTP transport uses `*errors.Error.Code` as the response status |
+
+```go
+package main
+
+import (
+    "context"
+    "net/http"
+    "os"
+    "time"
+
+    "github.com/zhangpeihaoks/firefly/app"
+    "github.com/zhangpeihaoks/firefly/pkg/errors"
+    "github.com/zhangpeihaoks/firefly/pkg/middleware"
+    "github.com/zhangpeihaoks/firefly/pkg/server"
+)
+
+func main() {
+    srv := server.New(
+        server.Address(":8080"),
+        server.Timeout(15*time.Second),
+        server.Middleware(middleware.Recovery(), middleware.RequestID(), middleware.Logging()),
+    )
+
+    // Over HTTP the second handler argument is the original *http.Request.
+    srv.Route(http.MethodGet, "/readyz", func(_ context.Context, _ any) (any, error) {
+        return nil, errors.New(errors.CodeServiceUnavailable, "NOT_READY", "config missing")
+    })
+
+    application := app.New(app.Name("my-service"), app.Server(srv))
+    if code, err := application.Run(); err != nil {
+        os.Exit(code)
+    }
+}
+```
+
+See [External service usage](docs/external_service_usage.md) for the full
+example and the limits of the public surface.
+
 ## Configuration
 
 ### YAML Configuration
@@ -429,6 +481,7 @@ For more detailed documentation, see:
 
 - [Configuration Guide](docs/config_port_example.md)
 - [Request/Response Usage](docs/request_response_usage.md)
+- [External Service Usage](docs/external_service_usage.md)
 
 ## License
 
