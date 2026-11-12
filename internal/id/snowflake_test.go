@@ -1,8 +1,9 @@
-﻿package id
+package id
 
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -95,15 +96,16 @@ func TestSnowflake_UniquenessConcurrent(t *testing.T) {
 }
 
 func TestSnowflake_ClockRollback(t *testing.T) {
-	current := defaultEpochMs + int64(1000)
-	sf, _ := NewSnowflake(1, WithNow(func() int64 { return current }))
+	var current atomic.Int64
+	current.Store(defaultEpochMs + int64(1000))
+	sf, _ := NewSnowflake(1, WithNow(func() int64 { return current.Load() }))
 
 	if _, err := sf.NextID(); err != nil {
 		t.Fatalf("first ID failed: %v", err)
 	}
 
 	// Simulate a 100ms clock rollback.
-	current = defaultEpochMs + int64(900)
+	current.Store(defaultEpochMs + int64(900))
 	start := time.Now()
 	_, err := sf.NextID()
 	elapsed := time.Since(start)
@@ -116,18 +118,19 @@ func TestSnowflake_ClockRollback(t *testing.T) {
 }
 
 func TestSnowflake_ClockRecovers(t *testing.T) {
-	current := defaultEpochMs + int64(1000)
-	sf, _ := NewSnowflake(1, WithNow(func() int64 { return current }))
+	var current atomic.Int64
+	current.Store(defaultEpochMs + int64(1000))
+	sf, _ := NewSnowflake(1, WithNow(func() int64 { return current.Load() }))
 
 	if _, err := sf.NextID(); err != nil {
 		t.Fatalf("first ID failed: %v", err)
 	}
 
 	// Rollback then recover: the wait should pass and generation continues.
-	current = defaultEpochMs + int64(980)
+	current.Store(defaultEpochMs + int64(980))
 	go func() {
-		time.Sleep(10 * time.Millisecond) // recover before the 20ms rollback wait ends
-		current = defaultEpochMs + int64(1005) // catch up past lastMs=epoch+1000
+		time.Sleep(10 * time.Millisecond)           // recover before the 20ms rollback wait ends
+		current.Store(defaultEpochMs + int64(1005)) // catch up past lastMs=epoch+1000
 	}()
 	if _, err := sf.NextID(); err != nil {
 		t.Fatalf("expected ID after clock recovery, got %v", err)
@@ -135,8 +138,9 @@ func TestSnowflake_ClockRecovers(t *testing.T) {
 }
 
 func TestSnowflake_SequenceOverflow(t *testing.T) {
-	current := defaultEpochMs + int64(1000)
-	sf, _ := NewSnowflake(1, WithNow(func() int64 { return current }))
+	var current atomic.Int64
+	current.Store(defaultEpochMs + int64(1000))
+	sf, _ := NewSnowflake(1, WithNow(func() int64 { return current.Load() }))
 
 	// Fill the entire sequence space within the same millisecond.
 	for i := 0; i < maxSequence; i++ {
@@ -148,7 +152,7 @@ func TestSnowflake_SequenceOverflow(t *testing.T) {
 	// Next call overflows the sequence and spins until the next millisecond.
 	go func() {
 		time.Sleep(20 * time.Millisecond)
-		current = defaultEpochMs + int64(1001)
+		current.Store(defaultEpochMs + int64(1001))
 	}()
 	id, err := sf.NextID()
 	if err != nil {

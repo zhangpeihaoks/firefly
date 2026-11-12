@@ -55,13 +55,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 is required by --new-from-rev below, which diffs
+          # against origin/main instead of reporting every historical finding.
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - uses: golangci/golangci-lint-action@v6
+      # Version is pinned on purpose: "latest" resolved to a binary built with
+      # an older Go, which refuses a go.mod targeting 1.26.2 with
+      # "can't load config: the Go language version used to build
+      # golangci-lint is lower than the targeted Go version".
+      - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
-          args: --timeout=5m
+          version: v2.15.0
+          # Gate only what a change introduces. The 163 findings already on main
+          # are tracked separately and must not block every pull request.
+          args: --timeout=5m --new-from-rev=origin/main
 
   # ── Coverage Report ────────────────────────────────────
   coverage:

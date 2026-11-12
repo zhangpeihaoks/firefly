@@ -45,12 +45,12 @@ type Group struct {
 type Option func(*options)
 
 // options collects the public configuration before it is mapped onto the
-// internal server options.
+// internal server options. Fields are ordered for pointer alignment.
 type options struct {
+	middleware     []middleware.Middleware
 	address        string
 	timeout        time.Duration
 	maxRequestBody int64
-	middleware     []middleware.Middleware
 }
 
 // Address sets the listening address, for example ":8080" or

@@ -283,13 +283,13 @@ func newNonBlockingMockServer() *nonBlockingMockServer {
 }
 
 // Start reports that it is listening and returns.
-func (m *nonBlockingMockServer) Start(ctx context.Context) error {
+func (m *nonBlockingMockServer) Start(_ context.Context) error {
 	close(m.started)
 	return nil
 }
 
 // Stop reports that it stopped.
-func (m *nonBlockingMockServer) Stop(ctx context.Context) error {
+func (m *nonBlockingMockServer) Stop(_ context.Context) error {
 	close(m.stopped)
 	return nil
 }

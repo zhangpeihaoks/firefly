@@ -69,7 +69,7 @@ func TestScheduler_SpecValidation(t *testing.T) {
 	}
 }
 
-// TestScheduler_ModeSingleton verifies only one instance executes per round.
+// TestScheduler_ModeSingleton verifies exactly one instance executes per round.
 func TestScheduler_ModeSingleton(t *testing.T) {
 	rdb, _ := newTestClient(t)
 	ctx := context.Background()
@@ -77,10 +77,24 @@ func TestScheduler_ModeSingleton(t *testing.T) {
 	sch1 := New(WithRedisLock(rdb))
 	sch2 := New(WithRedisLock(rdb))
 
-	var c1, c2 atomic.Int32
+	// Record executions per wall-clock second (= one cron round for a
+	// "* * * * * *" spec) instead of counting the total, so the assertion does
+	// not depend on how many seconds the sleep happens to span.
+	var mu sync.Mutex
+	perRound := map[int64]int{}
+	record := func(context.Context) error {
+		mu.Lock()
+		perRound[time.Now().Unix()]++
+		mu.Unlock()
+		return nil
+	}
 	spec := "*/1 * * * * *"
-	sch1.AddJob(spec, &testJob{name: "singleton", fn: func(context.Context) error { c1.Add(1); return nil }}, WithMode(ModeSingleton))
-	sch2.AddJob(spec, &testJob{name: "singleton", fn: func(context.Context) error { c2.Add(1); return nil }}, WithMode(ModeSingleton))
+	if err := sch1.AddJob(spec, &testJob{name: "singleton", fn: record}, WithMode(ModeSingleton)); err != nil {
+		t.Fatalf("AddJob 1 failed: %v", err)
+	}
+	if err := sch2.AddJob(spec, &testJob{name: "singleton", fn: record}, WithMode(ModeSingleton)); err != nil {
+		t.Fatalf("AddJob 2 failed: %v", err)
+	}
 
 	if err := sch1.Start(ctx); err != nil {
 		t.Fatalf("Start 1 failed: %v", err)
@@ -92,13 +106,15 @@ func TestScheduler_ModeSingleton(t *testing.T) {
 	sch1.Stop(ctx)
 	sch2.Stop(ctx)
 
-	sum := c1.Load() + c2.Load()
-	// ~2-3 trigger rounds; each round runs on exactly one instance.
-	if sum < 1 {
+	mu.Lock()
+	defer mu.Unlock()
+	if len(perRound) == 0 {
 		t.Fatal("expected at least one execution")
 	}
-	if sum > 4 {
-		t.Errorf("singleton executed %d times, expected <= rounds (~3): one per round", sum)
+	for round, n := range perRound {
+		if n != 1 {
+			t.Errorf("round %d executed %d times, want exactly 1: %v", round, n, perRound)
+		}
 	}
 }
 

@@ -42,6 +42,15 @@ func startServer(t *testing.T, opts ...Option) (*Server, string) {
 	return srv, "http://" + endpoint.Host
 }
 
+// closeBody closes the response body and reports a close failure instead of
+// discarding it, so errcheck stays meaningful in these tests.
+func closeBody(t *testing.T, resp *http.Response) {
+	t.Helper()
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
+}
+
 // TestRouteReturnsJSON verifies a registered route answers with the handler's
 // return value as a 200 JSON response.
 func TestRouteReturnsJSON(t *testing.T) {
@@ -54,7 +63,7 @@ func TestRouteReturnsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /healthz error = %v", err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -106,7 +115,7 @@ func TestRouteErrorMapsToStatus(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GET /x error = %v", err)
 			}
-			defer resp.Body.Close()
+			defer closeBody(t, resp)
 
 			if resp.StatusCode != tt.wantCode {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.wantCode)
@@ -150,7 +159,7 @@ func TestMiddlewareOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /chain error = %v", err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 
 	want := []string{"global", "route", "handler"}
 	if len(order) != len(want) {
@@ -182,7 +191,7 @@ func TestGroupPrefix(t *testing.T) {
 			t.Fatalf("GET %s error = %v", path, err)
 		}
 		body, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		closeBody(t, resp)
 		if readErr != nil {
 			t.Fatalf("read body error = %v", readErr)
 		}
@@ -208,7 +217,7 @@ func TestHandlerReceivesHTTPRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /inspect error = %v", err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -234,7 +243,7 @@ func TestStopClosesListener(t *testing.T) {
 	client := &http.Client{Timeout: time.Second}
 	resp, err := client.Get(base + "/healthz")
 	if err == nil {
-		resp.Body.Close()
+		closeBody(t, resp)
 		t.Fatal("request succeeded after Stop, want a connection error")
 	}
 }
