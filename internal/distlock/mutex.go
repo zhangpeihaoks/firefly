@@ -161,14 +161,17 @@ func (m *Mutex) startWatchdog() {
 		return
 	}
 	m.watchdogOn = true
-	m.stopCh = make(chan struct{})
+	// Capture the channel locally: the goroutine must not read m.stopCh, which
+	// stopWatchdog rewrites and closes from another goroutine.
+	stopCh := make(chan struct{})
+	m.stopCh = stopCh
 
 	go func() {
 		ticker := time.NewTicker(m.watchdog)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-m.stopCh:
+			case <-stopCh:
 				return
 			case <-ticker.C:
 				if err := m.renew(context.Background()); err != nil {
