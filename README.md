@@ -175,6 +175,54 @@ go run main.go
 
 服务将在 `http://localhost:8080` 启动。
 
+## 在独立仓库中使用（外部模块）
+
+上面的示例都在本仓库内（`examples/`），可以直接 import `internal/` 下的包。**服务放在自己的仓库里时 internal 规则会挡住这些包**：`internal/transport/http`、`internal/middleware`、`internal/errors` 都只能被本模块内的代码 import。
+
+为此框架提供三个公开包，独立仓库只需依赖它们：
+
+| 包 | 用途 |
+|---|---|
+| `pkg/server` | HTTP 服务（`server.New` / `Route` / `Group` / `Start` / `Stop`），返回值可直接传给 `app.Server` |
+| `pkg/middleware` | `Handler`/`Middleware` 类型 + `Recovery()` / `Logging()` / `RequestID()` / `Timeout()` / `Chain()` |
+| `pkg/errors` | `New` / `Newf` / `Wrap` 与状态码常量；HTTP 传输层会把 `*errors.Error` 的 `Code` 当作响应状态码 |
+
+```go
+package main
+
+import (
+    "context"
+    "net/http"
+    "os"
+    "time"
+
+    "github.com/zhangpeihaoks/firefly/app"
+    "github.com/zhangpeihaoks/firefly/pkg/errors"
+    "github.com/zhangpeihaoks/firefly/pkg/middleware"
+    "github.com/zhangpeihaoks/firefly/pkg/server"
+)
+
+func main() {
+    srv := server.New(
+        server.Address(":8080"),
+        server.Timeout(15*time.Second),
+        server.Middleware(middleware.Recovery(), middleware.RequestID(), middleware.Logging()),
+    )
+
+    // handler 的第二个参数在 HTTP 传输下就是原始 *http.Request
+    srv.Route(http.MethodGet, "/readyz", func(_ context.Context, _ any) (any, error) {
+        return nil, errors.New(errors.CodeServiceUnavailable, "NOT_READY", "config missing")
+    })
+
+    application := app.New(app.Name("my-service"), app.Server(srv))
+    if code, err := application.Run(); err != nil {
+        os.Exit(code)
+    }
+}
+```
+
+完整示例与限制说明见 [外部模块使用](docs/external_service_usage.md)。
+
 ## 配置管理
 
 ### YAML 配置文件
@@ -584,6 +632,7 @@ Firefly 使用属性测试（Property-Based Testing）与传统单元测试相�
 
 - [配置指南](docs/config_port_example.md)
 - [请求/响应使用](docs/request_response_usage.md)
+- [外部模块使用（独立仓库）](docs/external_service_usage.md)
 
 ## 许可证
 

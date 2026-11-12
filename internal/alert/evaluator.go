@@ -3,6 +3,7 @@ package alert
 import (
 	"context"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -138,7 +139,12 @@ type Evaluator struct {
 	manager  *Manager
 	rules    []Rule
 	interval time.Duration
-	stopCh   chan struct{}
+
+	// mu guards stopCh: Start stores it while Stop may read it from another
+	// goroutine, and the evaluation goroutine must not read the field directly
+	// (it captures the channel locally) or it would race with Stop.
+	mu     sync.Mutex
+	stopCh chan struct{}
 }
 
 // EvaluatorOption configures an Evaluator.
@@ -164,7 +170,13 @@ func NewEvaluator(mgr *Manager, rules []Rule, opts ...EvaluatorOption) *Evaluato
 
 // Start begins periodic evaluation until ctx is cancelled or Stop is called.
 func (e *Evaluator) Start(ctx context.Context) {
-	e.stopCh = make(chan struct{})
+	// The goroutine captures this channel instead of reading e.stopCh, so Stop
+	// closing it cannot race with the loop.
+	stopCh := make(chan struct{})
+	e.mu.Lock()
+	e.stopCh = stopCh
+	e.mu.Unlock()
+
 	go func() {
 		ticker := time.NewTicker(e.interval)
 		defer ticker.Stop()
@@ -172,7 +184,7 @@ func (e *Evaluator) Start(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				return
-			case <-e.stopCh:
+			case <-stopCh:
 				return
 			case <-ticker.C:
 				e.evaluate(ctx)
@@ -181,8 +193,11 @@ func (e *Evaluator) Start(ctx context.Context) {
 	}()
 }
 
-// Stop halts evaluation.
+// Stop halts evaluation. It is safe to call when evaluation never started and
+// may be called more than once.
 func (e *Evaluator) Stop() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.stopCh != nil {
 		close(e.stopCh)
 		e.stopCh = nil

@@ -32,10 +32,10 @@ end
 // fingerprint schemes — and works under containers, VMs and multi-instance
 // hosts.
 type RedisWorkerAllocator struct {
-	cmd     redis.Cmdable
-	prefix  string
-	ttl     time.Duration
-	renew   time.Duration
+	cmd    redis.Cmdable
+	prefix string
+	ttl    time.Duration
+	renew  time.Duration
 
 	mu      sync.Mutex
 	renewOn bool
@@ -112,14 +112,17 @@ func (a *RedisWorkerAllocator) startRenew(key, token string) {
 		return
 	}
 	a.renewOn = true
-	a.stopCh = make(chan struct{})
+	// Capture the channel locally: the goroutine must not read a.stopCh, which
+	// stopRenew rewrites and closes from another goroutine.
+	stopCh := make(chan struct{})
+	a.stopCh = stopCh
 
 	go func() {
 		ticker := time.NewTicker(a.renew)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-a.stopCh:
+			case <-stopCh:
 				return
 			case <-ticker.C:
 				if _, err := renewWorkerScript.Run(context.Background(), a.cmd,

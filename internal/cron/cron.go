@@ -23,14 +23,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 	"github.com/zhangpeihaoks/firefly/internal/distlock"
-	"github.com/redis/go-redis/v9"
 )
 
-// defaultLockTTL bounds how long a singleton job's lock is held after the
-// executing instance dies.
-const defaultLockTTL = 30 * time.Second
+// roundLockTTL is the lease of a per-round singleton lock. It only has to
+// outlive the round in which the instances contend for it, so it stays close
+// to the one-second scheduling granularity.
+const roundLockTTL = 5 * time.Second
 
 // cronParser accepts 6-field specs (with seconds), which the scheduler uses.
 var cronParser = cron.NewParser(
@@ -112,7 +113,7 @@ type Scheduler struct {
 	entries []*entry
 	logger  *slog.Logger
 
-	lockCmd     redis.Cmdable // enables ModeSingleton
+	lockCmd     redis.Cmdable    // enables ModeSingleton
 	coordinator ShardCoordinator // enables ModeShard
 }
 
@@ -248,12 +249,18 @@ func (s *Scheduler) run(e *entry) {
 			s.logger.Error("cron: singleton job without Redis lock backend", "job", e.job.Name())
 			return
 		}
-		mu := distlock.NewMutex(s.lockCmd, "cron:lock:"+e.job.Name(), distlock.WithTTL(defaultLockTTL))
+		// The lock key carries the current second, so the instances that fire
+		// for the same round contend on the same key and exactly one runs.
+		// The lock is deliberately not released after the job: releasing it
+		// would let an instance that fires a few milliseconds later run the
+		// same round again, which is two executions per round rather than one.
+		// The TTL only has to outlive the round.
+		key := fmt.Sprintf("cron:lock:%s:%d", e.job.Name(), time.Now().Unix())
+		mu := distlock.NewMutex(s.lockCmd, key, distlock.WithTTL(roundLockTTL))
 		if err := mu.TryLock(ctx); err != nil {
 			s.logger.Debug("cron: skip singleton job (lock held elsewhere)", "job", e.job.Name())
 			return
 		}
-		defer mu.Unlock(ctx)
 		s.execute(ctx, e)
 
 	case ModeAll:

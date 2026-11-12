@@ -140,14 +140,17 @@ func (c *RedisCoordinator) startHeartbeat() {
 		return
 	}
 	c.renewOn = true
-	c.stopCh = make(chan struct{})
+	// Capture the channel locally: the goroutine must not read c.stopCh, which
+	// stopHeartbeat rewrites and closes from another goroutine.
+	stopCh := make(chan struct{})
+	c.stopCh = stopCh
 
 	go func() {
 		ticker := time.NewTicker(c.renew)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-c.stopCh:
+			case <-stopCh:
 				return
 			case <-ticker.C:
 				if err := c.beat(context.Background()); err != nil {

@@ -1,101 +1,46 @@
-# See https://golangci-lint.run/usage/configuration/ for all options.
+# golangci-lint 配置（v2 格式，见 https://golangci-lint.run/docs/configuration/file/）
+#
+# 与 v1 的差异：
+#   - gofmt / goimports 已从 linters 迁到 formatters（v2 把它们当格式化器）
+#   - gosimple 合并进 staticcheck，不再单独列出
+#   - shadow 是 govet 的分析器，由 settings.govet.enable-all 覆盖，不再单列
+version: "2"
+
 run:
   concurrency: 4
   timeout: 5m
-  issues-exit-code: 1
   tests: true
 
-output:
-  formats:
-    - format: colored-line-number
-  print-issued-lines: true
-  print-linter-name: true
-
 linters:
+  # 默认集之外一律显式声明，避免升级时静默多出一堆规则
+  default: none
   enable:
-    - gofmt         # Checks if code is formatted correctly
-    - goimports     # Checks import statements are formatted correctly
-    - govet         # Reports suspicious constructs
-    - shadow        # Checks for variable shadowing
-    - ineffassign   # Detects ineffective assignments
-    - staticcheck   # Go static analysis
-    - errcheck      # Detects unchecked errors
-    - unconvert     # Detects unnecessary type conversions
-    - gosimple      # Simplifies code
-    - unused        # Detects unused code
-    - misspell      # Finds commonly misspelled English words
-    - revive        # Fast, configurable linter
-  disable:
-    - bodyclose     # Too many false positives in framework code
-    - noctx         # Not applicable for all HTTP client usage
-    - gosec         # Too strict for a framework, use manual review
-    - exhaustive    # Not required for all type switches
+    - errcheck      # 未处理的错误
+    - govet         # 可疑构造（enable-all 覆盖 shadow 等分析器）
+    - ineffassign   # 无效赋值
+    - misspell      # 常见英文拼写
+    - revive        # 快速可配置的 golint 替代
+    - staticcheck   # 静态分析（含原 gosimple）
+    - unconvert     # 多余的类型转换
+    - unused        # 未使用的标识符
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        # 字段对齐属于微优化：它会要求把字段按大小重排，破坏结构体的阅读顺序
+        # （含测试表），而框架里这些结构体都不在热路径上。
+        - fieldalignment
+  exclusions:
+    # 与 v1 保持一致：不额外放行任何目录或规则
+    generated: lax
 
-linters-settings:
-  gofmt:
-    simplify: true
-  goimports:
-    local-prefixes: github.com/zhangpeihaoks/firefly
-  govet:
-    enable-all: true
-  errcheck:
-    check-type-assertions: false
-    check-blank: false
-  staticcheck:
-    checks:
-      - all
-      - -SA1019  # Allow deprecated packages
-  revive:
-    rules:
-      - name: exported
-        severity: warning
-        disabled: false
-      - name: blank-imports
-        severity: warning
-      - name: var-naming
-        severity: warning
-      - name: package-comments
-        severity: warning
-        disabled: true  # Allow missing package comments for test files
-      - name: error-return
-        severity: error
-      - name: error-strings
-        severity: warning
-      - name: error-naming
-        severity: warning
-      - name: if-return
-        severity: warning
-      - name: range-val-in-closure
-        severity: warning
-      - name: unconditional-recursion
-        severity: error
-      - name: unused-parameter
-        severity: warning
-        disabled: true
-      - name: confusing-naming
-        severity: warning
-      - name: confusing-results
-        severity: warning
-        disabled: true
-      - name: constant-logical-expr
-        severity: error
-
-issues:
-  exclude-dirs:
-    - .kiro
-    - .kirograph
-    - .opencode
-    - knowledge
-    - docs
-    - examples
-    - integration
-    - tool
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-        - gosimple
-    - path: _pbt_test\.go
-      linters:
-        - gosimple
-        - unused
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes:
+        - github.com/zhangpeihaoks/firefly
